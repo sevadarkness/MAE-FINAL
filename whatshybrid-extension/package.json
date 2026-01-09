@@ -1,0 +1,32 @@
+{
+  "name": "whatshybrid-extension",
+  "version": "7.9.12",
+  "description": "WhatsHybrid Pro - Extensão Chrome para WhatsApp Web",
+  "private": true,
+  "main": "background.js",
+  "scripts": {
+    "test": "node tests/run-all.js",
+    "test:unit": "node tests/run-all.js --unit",
+    "test:integration": "node tests/run-all.js --integration",
+    "test:verbose": "node tests/run-all.js --verbose",
+    "test:smoke": "node tests/integration/smoke-test.js",
+    "test:eventbus": "node tests/unit/event-bus.test.js",
+    "test:scheduler": "node tests/unit/scheduler.test.js",
+    "lint": "echo 'No linter configured - consider adding ESLint'",
+    "build": "echo 'Extension ready - no build step required'",
+    "validate": "node -e \"JSON.parse(require('fs').readFileSync('manifest.json', 'utf8')); console.log('✅ manifest.json válido')\""
+  },
+  "keywords": [
+    "whatsapp",
+    "automation",
+    "crm",
+    "ai",
+    "chrome-extension"
+  ],
+  "author": "WhatsHybrid Team",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "devDependencies": {}
+}
