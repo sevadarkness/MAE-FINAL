@@ -11,6 +11,22 @@
   const VERSION = '1.0.0';
 
   // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-004: Escape HTML to prevent XSS attacks
+   * Converts dangerous characters to HTML entities
+   */
+  function escapeHtml(text) {
+    if (text == null) return '';
+    const str = String(text);
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ============================================
   // TOAST NOTIFICATIONS
   // ============================================
 
@@ -69,9 +85,10 @@
         cursor: pointer;
       `;
 
+      // SECURITY FIX P0-004: Escape message to prevent XSS
       toast.innerHTML = `
         <span style="font-size: 18px;">${icons[type] || icons.info}</span>
-        <span style="flex: 1;">${message}</span>
+        <span style="flex: 1;">${escapeHtml(message)}</span>
         <button style="background: none; border: none; color: white; cursor: pointer; opacity: 0.7; font-size: 16px;">×</button>
       `;
 
@@ -175,6 +192,7 @@
         box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
       `;
 
+      // SECURITY FIX P0-004: Escape title and content to prevent XSS
       modal.innerHTML = `
         <div class="whl-modal-header" style="
           display: flex;
@@ -183,7 +201,7 @@
           padding: 16px 20px;
           border-bottom: 1px solid rgba(255,255,255,0.1);
         ">
-          <h3 style="margin: 0; font-size: 16px; color: white;">${title}</h3>
+          <h3 style="margin: 0; font-size: 16px; color: white;">${escapeHtml(title)}</h3>
           ${closable ? '<button class="whl-modal-close" style="background: none; border: none; color: rgba(255,255,255,0.6); font-size: 24px; cursor: pointer; padding: 0; line-height: 1;">&times;</button>' : ''}
         </div>
         <div class="whl-modal-content" style="
@@ -191,7 +209,7 @@
           overflow-y: auto;
           flex: 1;
           color: white;
-        ">${content}</div>
+        ">${escapeHtml(content)}</div>
         ${buttons.length > 0 ? `
           <div class="whl-modal-footer" style="
             display: flex;
@@ -201,7 +219,7 @@
             border-top: 1px solid rgba(255,255,255,0.1);
           ">
             ${buttons.map(btn => `
-              <button class="whl-modal-btn ${btn.primary ? 'primary' : ''}" data-action="${btn.action || ''}" style="
+              <button class="whl-modal-btn ${btn.primary ? 'primary' : ''}" data-action="${escapeHtml(btn.action || '')}" style="
                 padding: 10px 20px;
                 border-radius: 8px;
                 border: none;
@@ -210,7 +228,7 @@
                 background: ${btn.primary ? 'linear-gradient(135deg, #8B5CF6, #7C3AED)' : 'rgba(255,255,255,0.1)'};
                 color: white;
                 transition: all 0.2s;
-              ">${btn.text}</button>
+              ">${escapeHtml(btn.text)}</button>
             `).join('')}
           </div>
         ` : ''}
@@ -281,7 +299,8 @@
       return new Promise((resolve) => {
         this.show({
           title: title || defaultTitle,
-          content: `<p style="margin: 0; font-size: 14px;">${message}</p>`,
+          // SECURITY FIX P0-004: Escape message to prevent XSS
+          content: `<p style="margin: 0; font-size: 14px;">${escapeHtml(message)}</p>`,
           width: '400px',
           buttons: [
             { text: cancelText, action: 'cancel', onClick: () => resolve(false) },
@@ -300,7 +319,8 @@
       return new Promise((resolve) => {
         this.show({
           title,
-          content: `<p style="margin: 0; font-size: 14px;">${message}</p>`,
+          // SECURITY FIX P0-004: Escape message to prevent XSS
+          content: `<p style="margin: 0; font-size: 14px;">${escapeHtml(message)}</p>`,
           width: '400px',
           buttons: [
             { text: okText, action: 'ok', primary: true, onClick: () => resolve(true) }
@@ -314,9 +334,10 @@
       return new Promise((resolve) => {
         const modal = this.show({
           title,
+          // SECURITY FIX P0-004: Escape message and defaultValue to prevent XSS
           content: `
-            <p style="margin: 0 0 12px; font-size: 14px;">${message}</p>
-            <input type="text" class="whl-modal-input" value="${defaultValue}" style="
+            <p style="margin: 0 0 12px; font-size: 14px;">${escapeHtml(message)}</p>
+            <input type="text" class="whl-modal-input" value="${escapeHtml(defaultValue)}" style="
               width: 100%;
               padding: 10px 12px;
               border: 1px solid rgba(255,255,255,0.2);
@@ -382,6 +403,7 @@
         z-index: 99999;
       `;
 
+      // SECURITY FIX P0-004: Escape message to prevent XSS
       this.overlay.innerHTML = `
         <div class="whl-spinner" style="
           width: 48px;
@@ -391,7 +413,7 @@
           border-radius: 50%;
           animation: spin 0.8s linear infinite;
         "></div>
-        <p style="color: white; margin-top: 16px; font-size: 14px;">${message}</p>
+        <p style="color: white; margin-top: 16px; font-size: 14px;">${escapeHtml(message)}</p>
       `;
 
       document.body.appendChild(this.overlay);
