@@ -195,7 +195,7 @@ class SimulationEngine {
     this.state = {
       isRunning: true,
       isPaused: false,
-      sessionId: `sim_${Date.now()}`,
+      sessionId: `sim_${crypto.randomUUID()}`, // SECURITY FIX: ID criptograficamente seguro
       theme: theme,
       executorProfile: executorProfile,
       simulatorProfile: simulatorProfile,
@@ -368,10 +368,15 @@ class SimulationEngine {
     // Usar a IA para gerar uma resposta contextual do cliente
     if (window.AIService) {
       try {
-        const systemPrompt = `Você está simulando um cliente em uma conversa de ${theme.name}.
-${theme.simulatorBehavior}
+        // SECURITY FIX (NOTAUDIT-001): Sanitizar inputs para prevenir prompt injection
+        const safeName = this._sanitizePrompt(theme.name);
+        const safeBehavior = this._sanitizePrompt(theme.simulatorBehavior);
+        const safeDescription = this._sanitizePrompt(profile.description);
 
-Perfil do cliente: ${profile.description}
+        const systemPrompt = `Você está simulando um cliente em uma conversa de ${safeName}.
+${safeBehavior}
+
+Perfil do cliente: ${safeDescription}
 
 REGRAS:
 - Responda como um cliente real faria
@@ -757,6 +762,23 @@ Responda de forma natural e profissional.`;
 
   isPaused() {
     return this.state.isPaused;
+  }
+
+  /**
+   * SECURITY FIX (NOTAUDIT-001): Sanitizar texto para prevenir prompt injection
+   * Remove caracteres especiais e limita tamanho
+   */
+  _sanitizePrompt(text) {
+    if (!text || typeof text !== 'string') return '';
+
+    // Remover caracteres potencialmente perigosos
+    const sanitized = text
+      .replace(/[<>{}[\]\\]/g, '') // Remove brackets e chars especiais
+      .replace(/\n{3,}/g, '\n\n')  // Limitar quebras de linha consecutivas
+      .trim();
+
+    // Limitar tamanho para evitar prompt muito longo
+    return sanitized.substring(0, 500);
   }
 }
 

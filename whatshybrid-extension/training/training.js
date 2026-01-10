@@ -338,7 +338,7 @@ class TrainingApp {
   renderExamples() {
     const grid = document.getElementById('examplesGrid');
     const empty = document.getElementById('emptyExamples');
-    
+
     if (!grid) return;
 
     if (this.examples.length === 0) {
@@ -349,10 +349,12 @@ class TrainingApp {
 
     if (empty) empty.style.display = 'none';
 
+    // SECURITY FIX (NOTAUDIT-001): Remover onclick inline para evitar XSS
+    // Usar event delegation ao invés de interpolar IDs diretamente
     grid.innerHTML = this.examples.map(ex => `
-      <div class="example-card" data-id="${ex.id}" onclick="app.openExampleModal(${ex.id})">
+      <div class="example-card" data-id="${parseInt(ex.id) || 0}">
         <div class="example-header">
-          <span class="example-category">${ex.category || 'Geral'}</span>
+          <span class="example-category">${this.escapeHtml(ex.category || 'Geral')}</span>
           <div class="example-quality">
             <span class="stars">${'★'.repeat(Math.round((ex.quality || 8) / 2))}</span>
             <span>${ex.quality || 8}/10</span>
@@ -362,7 +364,7 @@ class TrainingApp {
         <div class="example-output">${this.escapeHtml(ex.output || ex.response || '').substring(0, 200)}${(ex.output || ex.response || '').length > 200 ? '...' : ''}</div>
         <div class="example-footer">
           <div class="example-tags">
-            ${(ex.tags || []).slice(0, 4).map(tag => `<span class="example-tag">${tag}</span>`).join('')}
+            ${(ex.tags || []).slice(0, 4).map(tag => `<span class="example-tag">${this.escapeHtml(tag)}</span>`).join('')}
           </div>
           <div class="example-stats">
             <span>📊 ${ex.usageCount || 0}x usado</span>
@@ -370,12 +372,23 @@ class TrainingApp {
         </div>
       </div>
     `).join('');
+
+    // SECURITY FIX: Event delegation para clicks
+    grid.removeEventListener('click', this._handleExampleClick);
+    this._handleExampleClick = (e) => {
+      const card = e.target.closest('.example-card');
+      if (card) {
+        const id = parseInt(card.dataset.id);
+        if (!isNaN(id)) this.openExampleModal(id);
+      }
+    };
+    grid.addEventListener('click', this._handleExampleClick);
   }
 
   renderFaqs() {
     const list = document.getElementById('faqsList');
     const empty = document.getElementById('emptyFaqs');
-    
+
     if (!list) return;
 
     if (this.faqs.length === 0) {
@@ -386,23 +399,35 @@ class TrainingApp {
 
     if (empty) empty.style.display = 'none';
 
+    // SECURITY FIX (NOTAUDIT-001): Remover onclick inline para evitar XSS
     list.innerHTML = this.faqs.map(faq => `
-      <div class="faq-card" data-id="${faq.id}" onclick="app.openFaqModal(${faq.id})">
+      <div class="faq-card" data-id="${parseInt(faq.id) || 0}">
         <div class="faq-question">${this.escapeHtml(faq.q || faq.question || '')}</div>
         <div class="faq-answer">${this.escapeHtml(faq.a || faq.answer || '')}</div>
         ${faq.keywords?.length ? `
           <div class="faq-keywords">
-            ${faq.keywords.map(k => `<span class="faq-keyword">${k}</span>`).join('')}
+            ${faq.keywords.map(k => `<span class="faq-keyword">${this.escapeHtml(k)}</span>`).join('')}
           </div>
         ` : ''}
       </div>
     `).join('');
+
+    // SECURITY FIX: Event delegation para clicks
+    list.removeEventListener('click', this._handleFaqClick);
+    this._handleFaqClick = (e) => {
+      const card = e.target.closest('.faq-card');
+      if (card) {
+        const id = parseInt(card.dataset.id);
+        if (!isNaN(id)) this.openFaqModal(id);
+      }
+    };
+    list.addEventListener('click', this._handleFaqClick);
   }
 
   renderProducts() {
     const grid = document.getElementById('productsGrid');
     const empty = document.getElementById('emptyProducts');
-    
+
     if (!grid) return;
 
     if (this.products.length === 0) {
@@ -413,6 +438,7 @@ class TrainingApp {
 
     if (empty) empty.style.display = 'none';
 
+    // SECURITY FIX (NOTAUDIT-001): Remover onclick inline para evitar XSS
     grid.innerHTML = this.products.map(p => {
       const availabilityLabels = {
         available: 'Disponível',
@@ -422,11 +448,11 @@ class TrainingApp {
       };
 
       return `
-        <div class="product-card" data-id="${p.id}" onclick="app.openProductModal(${p.id})">
+        <div class="product-card" data-id="${parseInt(p.id) || 0}">
           <div class="product-header">
             <div>
               <div class="product-name">${this.escapeHtml(p.name || '')}</div>
-              ${p.sku ? `<div class="product-sku">SKU: ${p.sku}</div>` : ''}
+              ${p.sku ? `<div class="product-sku">SKU: ${this.escapeHtml(p.sku)}</div>` : ''}
             </div>
             <span class="product-availability ${p.availability || 'available'}">
               ${availabilityLabels[p.availability] || 'Disponível'}
@@ -437,10 +463,21 @@ class TrainingApp {
             <span class="current">R$ ${(p.promoPrice || p.price || 0).toFixed(2)}</span>
             ${p.promoPrice && p.price ? `<span class="original">R$ ${p.price.toFixed(2)}</span>` : ''}
           </div>
-          ${p.category ? `<div class="product-category">📁 ${p.category}</div>` : ''}
+          ${p.category ? `<div class="product-category">📁 ${this.escapeHtml(p.category)}</div>` : ''}
         </div>
       `;
     }).join('');
+
+    // SECURITY FIX: Event delegation para clicks
+    grid.removeEventListener('click', this._handleProductClick);
+    this._handleProductClick = (e) => {
+      const card = e.target.closest('.product-card');
+      if (card) {
+        const id = parseInt(card.dataset.id);
+        if (!isNaN(id)) this.openProductModal(id);
+      }
+    };
+    grid.addEventListener('click', this._handleProductClick);
   }
 
   loadBusinessForm() {
@@ -1018,43 +1055,104 @@ class TrainingApp {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.json';
-    
+
     input.onchange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
+
       try {
         const text = await file.text();
         const data = JSON.parse(text);
-        
-        if (data.examples) {
-          this.examples = [...this.examples, ...data.examples];
+
+        // SECURITY FIX (NOTAUDIT-001): Validar estrutura e prevenir prototype pollution
+        if (data.__proto__ || data.constructor || data.prototype) {
+          throw new Error('Invalid data structure: prototype pollution attempt detected');
+        }
+
+        // Validar e sanitizar examples
+        if (data.examples && Array.isArray(data.examples)) {
+          const validExamples = data.examples.filter(ex => this._validateExample(ex));
+          this.examples = [...this.examples, ...validExamples];
           await this.saveExamples();
         }
-        
-        if (data.faqs) {
-          this.faqs = [...this.faqs, ...data.faqs];
+
+        // Validar e sanitizar FAQs
+        if (data.faqs && Array.isArray(data.faqs)) {
+          const validFaqs = data.faqs.filter(faq => this._validateFaq(faq));
+          this.faqs = [...this.faqs, ...validFaqs];
         }
-        
-        if (data.products) {
-          this.products = [...this.products, ...data.products];
+
+        // Validar e sanitizar products
+        if (data.products && Array.isArray(data.products)) {
+          const validProducts = data.products.filter(p => this._validateProduct(p));
+          this.products = [...this.products, ...validProducts];
         }
-        
-        if (data.businessInfo) {
-          this.businessInfo = { ...this.businessInfo, ...data.businessInfo };
+
+        // Validar e sanitizar businessInfo
+        if (data.businessInfo && typeof data.businessInfo === 'object') {
+          const safeBusinessInfo = this._sanitizeBusinessInfo(data.businessInfo);
+          this.businessInfo = { ...this.businessInfo, ...safeBusinessInfo };
         }
-        
+
         await this.saveKnowledgeBase();
         this.renderAll();
         this.showToast('Dados importados com sucesso!', 'success');
-        
+
       } catch (error) {
         console.error('[TrainingApp] Erro ao importar:', error);
-        this.showToast('Erro ao importar arquivo', 'error');
+        this.showToast('Erro ao importar arquivo: ' + error.message, 'error');
       }
     };
-    
+
     input.click();
+  }
+
+  // SECURITY FIX: Validação de dados importados
+  _validateExample(ex) {
+    return ex &&
+           typeof ex === 'object' &&
+           !ex.__proto__ &&
+           (ex.input || ex.user) &&
+           (ex.output || ex.response) &&
+           (!ex.id || typeof ex.id === 'number' || typeof ex.id === 'string');
+  }
+
+  _validateFaq(faq) {
+    return faq &&
+           typeof faq === 'object' &&
+           !faq.__proto__ &&
+           (faq.q || faq.question) &&
+           (faq.a || faq.answer) &&
+           (!faq.id || typeof faq.id === 'number' || typeof faq.id === 'string');
+  }
+
+  _validateProduct(p) {
+    return p &&
+           typeof p === 'object' &&
+           !p.__proto__ &&
+           p.name &&
+           typeof p.name === 'string' &&
+           (!p.price || typeof p.price === 'number') &&
+           (!p.id || typeof p.id === 'number' || typeof p.id === 'string');
+  }
+
+  _sanitizeBusinessInfo(data) {
+    const allowed = ['name', 'segment', 'description', 'hours', 'responseTime', 'phone', 'email',
+                     'deliveryPolicy', 'freeShipping', 'returnPolicy', 'customInstructions', 'paymentMethods'];
+    const safe = {};
+
+    for (const key of allowed) {
+      if (data[key] !== undefined && data[key] !== null) {
+        // Apenas tipos primitivos ou arrays simples
+        if (typeof data[key] === 'string' || typeof data[key] === 'number' || typeof data[key] === 'boolean') {
+          safe[key] = data[key];
+        } else if (Array.isArray(data[key])) {
+          safe[key] = data[key].filter(v => typeof v === 'string');
+        }
+      }
+    }
+
+    return safe;
   }
 
   exportData() {
