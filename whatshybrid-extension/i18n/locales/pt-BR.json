@@ -395,7 +395,20 @@
     "selectItem": "Selecione um item.",
     "actionComplete": "Ação concluída!",
     "welcome": "Bem-vindo ao WhatsHybrid!",
-    "goodbye": "Até logo!"
+    "goodbye": "Até logo!",
+    "uploadError": "Erro no upload",
+    "contentInjectionError": "Erro ao injetar conteúdo",
+    "pdfExportNotAvailable": "Exportação PDF não disponível. Use CSV ou TXT.",
+    "noMessagesToExport": "Nenhuma mensagem para exportar."
+  },
+
+  "notifications": {
+    "error": "Erro",
+    "warning": "Atenção",
+    "info": "Informação",
+    "success": "Sucesso",
+    "confirm": "Confirmar",
+    "alert": "Aviso"
   },
   
   "time": {

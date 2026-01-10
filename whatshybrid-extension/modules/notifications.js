@@ -332,12 +332,16 @@
     return show({ title, message, type: 'success' });
   }
 
-  function error(message, title = 'Erro') {
-    return show({ title, message, type: 'error', duration: 8000 });
+  function error(message, title = '') {
+    // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+    const defaultTitle = (typeof window.t === 'function') ? window.t('notifications.error') : 'Erro';
+    return show({ title: title || defaultTitle, message, type: 'error', duration: 8000 });
   }
 
-  function warning(message, title = 'Atenção') {
-    return show({ title, message, type: 'warning' });
+  function warning(message, title = '') {
+    // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+    const defaultTitle = (typeof window.t === 'function') ? window.t('notifications.warning') : 'Atenção';
+    return show({ title: title || defaultTitle, message, type: 'warning' });
   }
 
   function info(message, title = '') {
@@ -354,16 +358,21 @@
   /**
    * Confirmação com Promise
    */
-  function confirm(message, title = 'Confirmar') {
+  function confirm(message, title = '') {
+    // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+    const defaultTitle = (typeof window.t === 'function') ? window.t('notifications.confirm') : 'Confirmar';
+    const cancelLabel = (typeof window.t === 'function') ? window.t('common.cancel') : 'Cancelar';
+    const confirmLabel = (typeof window.t === 'function') ? window.t('common.confirm') : 'Confirmar';
+
     return new Promise(resolve => {
       show({
-        title,
+        title: title || defaultTitle,
         message,
         type: 'warning',
         persistent: true,
         actions: [
-          { label: 'Cancelar', action: () => resolve(false) },
-          { label: 'Confirmar', action: () => resolve(true) }
+          { label: cancelLabel, action: () => resolve(false) },
+          { label: confirmLabel, action: () => resolve(true) }
         ]
       });
     });
