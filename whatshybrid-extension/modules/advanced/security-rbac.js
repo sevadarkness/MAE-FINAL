@@ -192,6 +192,12 @@
      * Cria usuário
      */
     async createUser(config) {
+      // SECURITY FIX (PARTIAL-014): Require TEAM_MANAGE permission to create users
+      if (!this.hasPermission(PERMISSIONS.TEAM_MANAGE)) {
+        console.error('[RBAC] Permission denied: TEAM_MANAGE required to create users');
+        throw new Error('Permission denied: team:manage required');
+      }
+
       const id = `user_${Date.now()}`;
       const user = {
         id,
@@ -211,6 +217,12 @@
      * Atualiza papel do usuário
      */
     async updateUserRole(userId, roleId) {
+      // SECURITY FIX (PARTIAL-014): Require TEAM_MANAGE permission to change roles
+      if (!this.hasPermission(PERMISSIONS.TEAM_MANAGE)) {
+        console.error('[RBAC] Permission denied: TEAM_MANAGE required to update user roles');
+        throw new Error('Permission denied: team:manage required');
+      }
+
       const user = this.users.get(userId);
       if (!user || !this.roles.has(roleId)) return false;
 
@@ -223,6 +235,12 @@
      * Cria papel personalizado
      */
     async createRole(config) {
+      // SECURITY FIX (PARTIAL-014): Require SYSTEM_ADMIN permission to create roles
+      if (!this.hasPermission(PERMISSIONS.SYSTEM_ADMIN)) {
+        console.error('[RBAC] Permission denied: SYSTEM_ADMIN required to create roles');
+        throw new Error('Permission denied: system:admin required');
+      }
+
       const id = `role_${Date.now()}`;
       const role = {
         id,
@@ -241,6 +259,12 @@
      * Atualiza permissões de um papel
      */
     async updateRolePermissions(roleId, permissions) {
+      // SECURITY FIX (PARTIAL-014): Require SYSTEM_ADMIN permission to modify permissions
+      if (!this.hasPermission(PERMISSIONS.SYSTEM_ADMIN)) {
+        console.error('[RBAC] Permission denied: SYSTEM_ADMIN required to update permissions');
+        throw new Error('Permission denied: system:admin required');
+      }
+
       const role = this.roles.get(roleId);
       if (!role) return false;
 
@@ -253,6 +277,12 @@
      * Remove usuário
      */
     async deleteUser(userId) {
+      // SECURITY FIX (PARTIAL-014): Require TEAM_MANAGE permission to delete users
+      if (!this.hasPermission(PERMISSIONS.TEAM_MANAGE)) {
+        console.error('[RBAC] Permission denied: TEAM_MANAGE required to delete users');
+        throw new Error('Permission denied: team:manage required');
+      }
+
       this.users.delete(userId);
       if (this.currentUser === userId) {
         this.currentUser = null;

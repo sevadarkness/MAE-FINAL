@@ -10,6 +10,22 @@
 (function() {
   'use strict';
 
+  // ============================================================
+  // 🛡️ SECURITY HELPERS
+  // ============================================================
+
+  /**
+   * Escapes HTML special characters to prevent XSS
+   * @param {string} text - Text to escape
+   * @returns {string} - HTML-safe text
+   */
+  function escapeHtml(text) {
+    if (!text || typeof text !== 'string') return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   // Aguarda SmartBot IA e SmartReplies estarem disponíveis
   let initAttempts = 0;
   const maxAttempts = 50;
@@ -194,7 +210,7 @@
           </div>
           <div class="smartbot-context-item">
             <span class="label">Estágio:</span>
-            <span class="value">${context.flowAnalysis.currentStage}</span>
+            <span class="value">${escapeHtml(context.flowAnalysis.currentStage)}</span>
           </div>
           <div class="smartbot-context-item">
             <span class="label">Urgência:</span>
@@ -228,7 +244,8 @@
         'familiar_professional': '🤝 Profissional Familiar',
         'professional_neutral': '💼 Profissional'
       };
-      return tones[tone] || tone;
+      // SECURITY FIX (PARTIAL-013-P0.3): Escape fallback to prevent XSS
+      return tones[tone] || escapeHtml(String(tone));
     }
 
     /**
@@ -241,7 +258,8 @@
         'consultative_selling': '💼 Venda Consultiva',
         'standard_support': '🛠️ Suporte Padrão'
       };
-      return approaches[approach] || approach;
+      // SECURITY FIX (PARTIAL-013-P0.3): Escape fallback to prevent XSS
+      return approaches[approach] || escapeHtml(String(approach));
     }
 
     // ============================================================
@@ -284,7 +302,7 @@
         <div class="smartbot-anomalies">
           <div class="anomaly-header">⚠️ Anomalias Detectadas</div>
           ${metrics.anomalies.map(a => `
-            <div class="anomaly-item">${a.message}</div>
+            <div class="anomaly-item">${escapeHtml(a.message)}</div>
           `).join('')}
         </div>
         ` : ''}
