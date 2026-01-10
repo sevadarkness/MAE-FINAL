@@ -718,10 +718,10 @@
         }
       }
 
-      // MÉTODO 4: BackendClient
+      // MÉTODO 4: BackendClient (usa .complete, não .chat)
       if (!suggestion && window.BackendClient?.isConnected?.()) {
         try {
-          const result = await window.BackendClient.ai.chat({
+          const result = await window.BackendClient.ai.complete({
             messages: [
               { role: 'system', content: 'Você é um assistente de atendimento profissional. Gere respostas úteis e concisas em português.' },
               { role: 'user', content: `Última mensagem do cliente: ${lastUserMsg}\n\nGere uma resposta profissional.` }

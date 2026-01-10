@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('../utils/uuid-wrapper');
 const db = require('../utils/database');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const { authenticate } = require('../middleware/auth');
+const { checkSubscription, checkLimit } = require('../middleware/subscription');
 
 // ===== DEALS =====
 
@@ -33,7 +34,7 @@ router.get('/deals/:id', authenticate, asyncHandler(async (req, res) => {
   res.json({ deal, tasks });
 }));
 
-router.post('/deals', authenticate, asyncHandler(async (req, res) => {
+router.post('/deals', authenticate, checkSubscription('deals'), checkLimit('deals'), asyncHandler(async (req, res) => {
   const { contact_id, title, description, value, stage, probability, expected_close_date, assigned_to, tags, custom_fields } = req.body;
   const id = uuidv4();
   db.run(
@@ -140,6 +141,208 @@ router.put('/labels/:id', authenticate, asyncHandler(async (req, res) => {
 router.delete('/labels/:id', authenticate, asyncHandler(async (req, res) => {
   db.run('DELETE FROM labels WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   res.json({ message: 'Label deleted' });
+}));
+
+// ===== SYNC (para extensão) =====
+
+/**
+ * POST /api/v1/crm/sync - Sincroniza dados CRM da extensão
+ * Recebe: { contacts, deals, pipeline, lastSync }
+ * Retorna: dados mesclados do servidor
+ */
+router.post('/sync', authenticate, asyncHandler(async (req, res) => {
+  const { contacts = [], deals = [], pipeline, lastSync } = req.body;
+  const workspaceId = req.workspaceId;
+  const userId = req.userId;
+
+  let syncedContacts = 0;
+  let syncedDeals = 0;
+
+  // Sincronizar contatos
+  for (const contact of contacts) {
+    const existing = db.get(
+      'SELECT id, updated_at FROM contacts WHERE id = ? AND workspace_id = ?',
+      [contact.id, workspaceId]
+    );
+
+    if (!existing) {
+      // Inserir novo contato
+      db.run(`
+        INSERT INTO contacts (id, workspace_id, phone, name, email, tags, labels, custom_fields, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        contact.id || uuidv4(),
+        workspaceId,
+        contact.phone,
+        contact.name || '',
+        contact.email || '',
+        JSON.stringify(contact.tags || []),
+        JSON.stringify(contact.labels || []),
+        JSON.stringify(contact.customFields || {}),
+        contact.status || 'active',
+        contact.createdAt || new Date().toISOString(),
+        contact.updatedAt || new Date().toISOString()
+      ]);
+      syncedContacts++;
+    } else {
+      // Atualizar se mais recente
+      const contactUpdated = new Date(contact.updatedAt || 0);
+      const existingUpdated = new Date(existing.updated_at || 0);
+
+      if (contactUpdated > existingUpdated) {
+        db.run(`
+          UPDATE contacts
+          SET name = ?, email = ?, tags = ?, labels = ?, custom_fields = ?, status = ?, updated_at = ?
+          WHERE id = ? AND workspace_id = ?
+        `, [
+          contact.name,
+          contact.email,
+          JSON.stringify(contact.tags || []),
+          JSON.stringify(contact.labels || []),
+          JSON.stringify(contact.customFields || {}),
+          contact.status || 'active',
+          contact.updatedAt,
+          contact.id,
+          workspaceId
+        ]);
+        syncedContacts++;
+      }
+    }
+  }
+
+  // Sincronizar deals
+  for (const deal of deals) {
+    const existing = db.get(
+      'SELECT id, updated_at FROM deals WHERE id = ? AND workspace_id = ?',
+      [deal.id, workspaceId]
+    );
+
+    if (!existing) {
+      // Inserir novo deal
+      db.run(`
+        INSERT INTO deals (id, workspace_id, contact_id, title, description, value, stage, probability, tags, custom_fields, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        deal.id || uuidv4(),
+        workspaceId,
+        deal.contactId,
+        deal.title,
+        deal.description || '',
+        deal.value || 0,
+        deal.stage || 'lead',
+        deal.probability || 0,
+        JSON.stringify(deal.tags || []),
+        JSON.stringify(deal.customFields || {}),
+        deal.createdAt || new Date().toISOString(),
+        deal.updatedAt || new Date().toISOString()
+      ]);
+      syncedDeals++;
+    } else {
+      // Atualizar se mais recente
+      const dealUpdated = new Date(deal.updatedAt || 0);
+      const existingUpdated = new Date(existing.updated_at || 0);
+
+      if (dealUpdated > existingUpdated) {
+        db.run(`
+          UPDATE deals
+          SET title = ?, description = ?, value = ?, stage = ?, probability = ?, tags = ?, custom_fields = ?, updated_at = ?
+          WHERE id = ? AND workspace_id = ?
+        `, [
+          deal.title,
+          deal.description,
+          deal.value,
+          deal.stage,
+          deal.probability,
+          JSON.stringify(deal.tags || []),
+          JSON.stringify(deal.customFields || {}),
+          deal.updatedAt,
+          deal.id,
+          workspaceId
+        ]);
+        syncedDeals++;
+      }
+    }
+  }
+
+  // Retornar dados do servidor
+  const serverContacts = db.all(
+    'SELECT * FROM contacts WHERE workspace_id = ? ORDER BY created_at DESC',
+    [workspaceId]
+  ).map(c => ({
+    ...c,
+    tags: JSON.parse(c.tags || '[]'),
+    labels: JSON.parse(c.labels || '[]'),
+    customFields: JSON.parse(c.custom_fields || '{}')
+  }));
+
+  const serverDeals = db.all(
+    'SELECT * FROM deals WHERE workspace_id = ? ORDER BY created_at DESC',
+    [workspaceId]
+  ).map(d => ({
+    ...d,
+    tags: JSON.parse(d.tags || '[]'),
+    customFields: JSON.parse(d.custom_fields || '{}')
+  }));
+
+  const serverPipeline = db.all(
+    'SELECT * FROM pipeline_stages WHERE workspace_id = ? ORDER BY position',
+    [workspaceId]
+  );
+
+  res.json({
+    success: true,
+    synced: {
+      contacts: syncedContacts,
+      deals: syncedDeals
+    },
+    data: {
+      contacts: serverContacts,
+      deals: serverDeals,
+      pipeline: serverPipeline.length > 0 ? { stages: serverPipeline } : null,
+      lastSync: new Date().toISOString()
+    }
+  });
+}));
+
+/**
+ * GET /api/v1/crm/data - Busca dados CRM do servidor
+ */
+router.get('/data', authenticate, asyncHandler(async (req, res) => {
+  const workspaceId = req.workspaceId;
+
+  const contacts = db.all(
+    'SELECT * FROM contacts WHERE workspace_id = ? ORDER BY created_at DESC',
+    [workspaceId]
+  ).map(c => ({
+    ...c,
+    tags: JSON.parse(c.tags || '[]'),
+    labels: JSON.parse(c.labels || '[]'),
+    customFields: JSON.parse(c.custom_fields || '{}')
+  }));
+
+  const deals = db.all(
+    'SELECT * FROM deals WHERE workspace_id = ? ORDER BY created_at DESC',
+    [workspaceId]
+  ).map(d => ({
+    ...d,
+    tags: JSON.parse(d.tags || '[]'),
+    customFields: JSON.parse(d.custom_fields || '{}')
+  }));
+
+  const pipeline = db.all(
+    'SELECT * FROM pipeline_stages WHERE workspace_id = ? ORDER BY position',
+    [workspaceId]
+  );
+
+  res.json({
+    success: true,
+    data: {
+      contacts,
+      deals,
+      pipeline: pipeline.length > 0 ? { stages: pipeline } : null,
+      lastSync: new Date().toISOString()
+    }
+  });
 }));
 
 module.exports = router;

@@ -97,4 +97,106 @@ router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
   res.json({ message: 'Task deleted' });
 }));
 
+// ===== SYNC (para extensão) =====
+
+/**
+ * POST /api/v1/tasks/sync - Sincroniza tasks da extensão
+ */
+router.post('/sync', authenticate, asyncHandler(async (req, res) => {
+  const { tasks: clientTasks = [] } = req.body;
+  const workspaceId = req.workspaceId;
+  const userId = req.userId;
+
+  let syncedTasks = 0;
+
+  // Sincronizar tasks
+  for (const task of clientTasks) {
+    const existing = db.get(
+      'SELECT id, updated_at FROM tasks WHERE id = ? AND workspace_id = ?',
+      [task.id, workspaceId]
+    );
+
+    if (!existing) {
+      // Inserir nova task
+      db.run(`
+        INSERT INTO tasks (id, workspace_id, title, description, type, priority, status, contact_id, due_date, created_at, updated_at, completed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `, [
+        task.id || uuidv4(),
+        workspaceId,
+        task.title,
+        task.description || '',
+        task.type || 'other',
+        task.priority || 'medium',
+        task.status || 'pending',
+        task.contactId || null,
+        task.dueDate || null,
+        task.createdAt || new Date().toISOString(),
+        task.updatedAt || new Date().toISOString(),
+        task.completedAt || null
+      ]);
+      syncedTasks++;
+    } else {
+      // Atualizar se mais recente
+      const taskUpdated = new Date(task.updatedAt || 0);
+      const existingUpdated = new Date(existing.updated_at || 0);
+
+      if (taskUpdated > existingUpdated) {
+        db.run(`
+          UPDATE tasks
+          SET title = ?, description = ?, type = ?, priority = ?, status = ?, due_date = ?, updated_at = ?, completed_at = ?
+          WHERE id = ? AND workspace_id = ?
+        `, [
+          task.title,
+          task.description,
+          task.type,
+          task.priority,
+          task.status,
+          task.dueDate,
+          task.updatedAt,
+          task.completedAt,
+          task.id,
+          workspaceId
+        ]);
+        syncedTasks++;
+      }
+    }
+  }
+
+  // Retornar tasks do servidor
+  const serverTasks = db.all(
+    'SELECT * FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC',
+    [workspaceId]
+  );
+
+  res.json({
+    success: true,
+    synced: syncedTasks,
+    data: {
+      tasks: serverTasks,
+      lastSync: new Date().toISOString()
+    }
+  });
+}));
+
+/**
+ * GET /api/v1/tasks/data - Busca tasks do servidor
+ */
+router.get('/data', authenticate, asyncHandler(async (req, res) => {
+  const workspaceId = req.workspaceId;
+
+  const tasks = db.all(
+    'SELECT * FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC',
+    [workspaceId]
+  );
+
+  res.json({
+    success: true,
+    data: {
+      tasks,
+      lastSync: new Date().toISOString()
+    }
+  });
+}));
+
 module.exports = router;

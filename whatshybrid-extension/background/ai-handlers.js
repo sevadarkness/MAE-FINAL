@@ -13,6 +13,20 @@
 let memoryQueue = [];
 const MAX_MEMORY_QUEUE = 500;
 const MEMORY_EVENT_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
+const MEMORY_QUEUE_STORAGE_KEY = 'whl_memory_queue';
+
+// Carregar queue do storage ao inicializar (previne perda quando SW é terminado)
+(async () => {
+  try {
+    const result = await chrome.storage.local.get([MEMORY_QUEUE_STORAGE_KEY]);
+    if (result[MEMORY_QUEUE_STORAGE_KEY] && Array.isArray(result[MEMORY_QUEUE_STORAGE_KEY])) {
+      memoryQueue = result[MEMORY_QUEUE_STORAGE_KEY];
+      console.log('[Background] ✅ Memory queue carregada do storage:', memoryQueue.length, 'eventos');
+    }
+  } catch (error) {
+    console.error('[Background] ❌ Erro ao carregar memory queue:', error);
+  }
+})();
 
 /**
  * Enfileira evento de memória
@@ -43,13 +57,20 @@ async function enqueueMemoryEvent(event) {
 }
 
 /**
- * Envia fila de memórias para o backend
+ * Envia fila de memórias para o backend com exponential backoff
+ * @param {Object} settings - Configurações do backend
+ * @param {number} retryCount - Contador de tentativas (para recursão)
+ * @returns {Promise<Object>} Resultado da sincronização
  */
-async function flushMemoryQueue(settings) {
-  if (memoryQueue.length === 0) return;
-  
+async function flushMemoryQueue(settings, retryCount = 0) {
+  if (memoryQueue.length === 0) return { success: true, synced: 0 };
+
+  const MAX_RETRIES = 5;
+  const BASE_DELAY = 1000; // 1 segundo
+  const MAX_DELAY = 5 * 60 * 1000; // 5 minutos
+
   try {
-    // Backend config compat: aceitar múltiplos schemas (whl_backend_config, whl_backend_client, backend_url/token)
+    // Backend config compat: aceitar múltiplos schemas
     const stored = await chrome.storage.local.get(['whl_backend_config', 'whl_backend_client', 'backend_url', 'backend_token', 'whl_backend_url']);
     const cfg = stored?.whl_backend_config || null;
 
@@ -65,31 +86,62 @@ async function flushMemoryQueue(settings) {
     }
 
     backendUrl = String(backendUrl || 'http://localhost:3000').replace(/\/$/, '');
-    
+
     if (!token) {
-      console.warn('[Background] Token não configurado, não é possível sincronizar memórias');
-      return;
+      console.warn('[Background] Token não configurado, memórias não serão sincronizadas');
+      return { success: false, error: 'NO_TOKEN' };
     }
-    
-    // Rota corrigida (Memória v1)
+
+    // Marcar eventos com retry count
+    const eventsToSync = memoryQueue.map(e => ({
+      ...e,
+      retryCount: (e.retryCount || 0) + 1
+    }));
+
     const response = await fetch(`${backendUrl}/api/v1/memory/batch`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`
       },
-      body: JSON.stringify({ events: memoryQueue })
+      body: JSON.stringify({ events: eventsToSync })
     });
-    
+
     if (response.ok) {
-      console.log('[Background] Memórias sincronizadas:', memoryQueue.length);
+      console.log(`[Background] ✅ Memórias sincronizadas: ${memoryQueue.length} eventos`);
       memoryQueue = [];
       await chrome.storage.local.set({ whl_memory_queue: [] });
+      return { success: true, synced: eventsToSync.length };
     } else {
-      console.error('[Background] Erro ao sincronizar memórias:', response.status);
+      throw new Error(`HTTP ${response.status}`);
     }
   } catch (error) {
-    console.error('[Background] Erro ao sincronizar memórias:', error);
+    console.warn(`[Background] ⚠️ Falha na sincronização (tentativa ${retryCount + 1}/${MAX_RETRIES}): ${error.message}`);
+
+    // Se excedeu máximo de tentativas
+    if (retryCount >= MAX_RETRIES) {
+      console.error('[Background] ❌ Máximo de tentativas excedido. Eventos serão mantidos na fila.');
+
+      // Marcar eventos com erro
+      memoryQueue = memoryQueue.map(e => ({
+        ...e,
+        retryCount: (e.retryCount || 0) + 1,
+        needsManualSync: true,
+        lastError: error.message,
+        lastRetryAt: Date.now()
+      }));
+
+      await chrome.storage.local.set({ whl_memory_queue: memoryQueue });
+      return { success: false, error: 'MAX_RETRIES_EXCEEDED', pending: memoryQueue.length };
+    }
+
+    // Calcular delay exponencial: 1s, 2s, 4s, 8s, 16s, max 5min
+    const delay = Math.min(BASE_DELAY * Math.pow(2, retryCount), MAX_DELAY);
+    console.log(`[Background] 🔄 Tentando novamente em ${Math.round(delay/1000)}s...`);
+
+    // Aguardar e tentar novamente (recursivo)
+    await new Promise(resolve => setTimeout(resolve, delay));
+    return flushMemoryQueue(settings, retryCount + 1);
   }
 }
 

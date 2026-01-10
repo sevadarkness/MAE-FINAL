@@ -62,7 +62,49 @@
 
   // Referência do interval de binding para cleanup
   let eventBusBindingInterval = null;
-  
+
+  // Cache do próprio número para verificação fromMe
+  let myOwnNumber = null;
+
+  /**
+   * Obtém o próprio número do usuário (para fallback fromMe)
+   */
+  async function getMyOwnNumber() {
+    if (myOwnNumber) return myOwnNumber;
+
+    try {
+      // Método 1: Via Store.Me
+      if (window.Store?.Me?.getMeContact) {
+        const me = window.Store.Me.getMeContact();
+        myOwnNumber = me?.id?.user || me?.id?._serialized?.split('@')[0];
+        if (myOwnNumber) {
+          console.log('[Autopilot] Próprio número detectado via Store.Me:', myOwnNumber);
+          return myOwnNumber;
+        }
+      }
+
+      // Método 2: Via Store.Conn
+      if (window.Store?.Conn?.wid?.user) {
+        myOwnNumber = window.Store.Conn.wid.user;
+        console.log('[Autopilot] Próprio número detectado via Store.Conn:', myOwnNumber);
+        return myOwnNumber;
+      }
+
+      // Método 3: Via WAPI
+      if (window.WAPI?.getOwnNumber) {
+        myOwnNumber = await window.WAPI.getOwnNumber();
+        if (myOwnNumber) {
+          console.log('[Autopilot] Próprio número detectado via WAPI:', myOwnNumber);
+          return myOwnNumber;
+        }
+      }
+    } catch (error) {
+      console.warn('[Autopilot] Erro ao obter próprio número:', error);
+    }
+
+    return myOwnNumber;
+  }
+
   // ============================================
   // AsyncMutex - Previne race conditions
   // ============================================
@@ -873,11 +915,30 @@
     }, 500);
   }
 
-  function handleNewMessage(msg) {
+  async function handleNewMessage(msg) {
     if (!CONFIG.enabled) return;
     if (!msg) return;
 
-    const fromMe = !!(msg.fromMe || msg.id?.fromMe);
+    // Check primário de fromMe
+    let fromMe = !!(msg.fromMe || msg.id?.fromMe);
+
+    // Fallback: comparar com próprio número (previne loop de auto-resposta)
+    if (fromMe === undefined || fromMe === null) {
+      const myNumber = await getMyOwnNumber();
+      if (myNumber) {
+        const senderNumber =
+          msg.from?.split('@')[0] ||
+          msg.id?.remote?.split('@')[0] ||
+          msg.id?.participant?.split('@')[0];
+
+        if (senderNumber === myNumber) {
+          fromMe = true;
+          console.warn('[Autopilot] ⚠️ Mensagem própria detectada via fallback fromMe (número:', senderNumber, ')');
+        }
+      }
+    }
+
+    // Se é mensagem própria, ignorar
     if (fromMe) return;
 
     const rawChatId =

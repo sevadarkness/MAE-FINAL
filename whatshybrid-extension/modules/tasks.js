@@ -47,9 +47,11 @@
 
     await loadTasks();
     startReminderChecker();
+    startPeriodicSync();
 
     state.initialized = true;
     console.log('[Tasks] ✅ Módulo inicializado com', state.tasks.length, 'tarefas');
+    console.log('[Tasks] 🔄 Sincronização periódica ativada (a cada 5 minutos)');
 
     if (window.EventBus) {
       window.EventBus.emit(window.WHL_EVENTS?.MODULE_LOADED, { module: 'tasks' });
@@ -60,11 +62,39 @@
    * Carrega tarefas
    */
   async function loadTasks() {
-    return new Promise(resolve => {
+    return new Promise(async (resolve) => {
+      // Primeiro, tentar carregar do backend
+      try {
+        const response = await syncWithBackend();
+        if (response && response.success) {
+          const data = response.data;
+          state.tasks = data.tasks || [];
+
+          // Salvar local como cache
+          await saveToLocalStorage();
+          console.log('[Tasks] ✅ Dados carregados do backend:', state.tasks.length, 'tarefas');
+          resolve();
+          return;
+        }
+      } catch (error) {
+        console.warn('[Tasks] ⚠️ Falha ao carregar do backend, usando cache local:', error.message);
+      }
+
+      // Fallback: carregar do storage local
       chrome.storage.local.get([STORAGE_KEY], result => {
         state.tasks = result[STORAGE_KEY] || [];
+        console.log('[Tasks] ℹ️ Dados carregados do cache local');
         resolve();
       });
+    });
+  }
+
+  async function saveToLocalStorage() {
+    return new Promise(resolve => {
+      chrome.storage.local.set({
+        [STORAGE_KEY]: state.tasks,
+        [STORAGE_KEY + '_lastSync']: new Date().toISOString()
+      }, resolve);
     });
   }
 
@@ -72,9 +102,91 @@
    * Salva tarefas
    */
   async function saveTasks() {
-    return new Promise(resolve => {
-      chrome.storage.local.set({ [STORAGE_KEY]: state.tasks }, resolve);
+    // Salvar local primeiro (para funcionar offline)
+    await saveToLocalStorage();
+
+    // Tentar sincronizar com backend em background
+    try {
+      await syncWithBackend();
+      console.log('[Tasks] ✅ Dados sincronizados com backend');
+    } catch (error) {
+      console.warn('[Tasks] ⚠️ Falha ao sincronizar com backend:', error.message);
+      // Não bloqueia a operação - dados estão salvos localmente
+    }
+  }
+
+  async function syncWithBackend() {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const result = await chrome.storage.local.get(['whl_backend_url', 'whl_auth_token']);
+        const backendUrl = result.whl_backend_url;
+        const token = result.whl_auth_token;
+
+        if (!backendUrl || !token) {
+          reject(new Error('Backend não configurado'));
+          return;
+        }
+
+        // Preparar dados para envio
+        const payload = {
+          tasks: state.tasks.map(t => ({
+            id: t.id,
+            title: t.title,
+            description: t.description,
+            type: t.type,
+            priority: t.priority,
+            status: t.status,
+            contactId: t.contactPhone,
+            dueDate: t.dueDate,
+            reminderDate: t.reminderDate,
+            tags: t.tags,
+            createdAt: t.createdAt,
+            updatedAt: t.updatedAt,
+            completedAt: t.completedAt
+          }))
+        };
+
+        const response = await fetch(`${backendUrl}/api/v1/tasks/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Mesclar dados do servidor
+        if (data.success && data.data) {
+          // Usar dados do servidor como fonte da verdade
+          state.tasks = data.data.tasks || state.tasks;
+        }
+
+        resolve(data);
+      } catch (error) {
+        reject(error);
+      }
     });
+  }
+
+  // Sincronização periódica (a cada 5 minutos)
+  let syncInterval = null;
+  function startPeriodicSync() {
+    if (syncInterval) return;
+
+    syncInterval = setInterval(async () => {
+      try {
+        await syncWithBackend();
+        console.log('[Tasks] 🔄 Sincronização periódica concluída');
+      } catch (error) {
+        console.warn('[Tasks] ⚠️ Falha na sincronização periódica:', error.message);
+      }
+    }, 5 * 60 * 1000); // 5 minutos
   }
 
   /**
