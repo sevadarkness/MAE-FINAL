@@ -171,7 +171,7 @@ function checkLimit(resource) {
       const currentPlan = workspace.plan || 'free';
       const limits = PLAN_LIMITS[currentPlan];
 
-      if (!limits || !limits[resource]) {
+      if (!limits || limits[resource] == null) {
         // Limite não definido - permitir
         return next();
       }
