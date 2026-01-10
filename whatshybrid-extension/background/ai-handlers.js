@@ -13,6 +13,20 @@
 let memoryQueue = [];
 const MAX_MEMORY_QUEUE = 500;
 const MEMORY_EVENT_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
+const MEMORY_QUEUE_STORAGE_KEY = 'whl_memory_queue';
+
+// Carregar queue do storage ao inicializar (previne perda quando SW é terminado)
+(async () => {
+  try {
+    const result = await chrome.storage.local.get([MEMORY_QUEUE_STORAGE_KEY]);
+    if (result[MEMORY_QUEUE_STORAGE_KEY] && Array.isArray(result[MEMORY_QUEUE_STORAGE_KEY])) {
+      memoryQueue = result[MEMORY_QUEUE_STORAGE_KEY];
+      console.log('[Background] ✅ Memory queue carregada do storage:', memoryQueue.length, 'eventos');
+    }
+  } catch (error) {
+    console.error('[Background] ❌ Erro ao carregar memory queue:', error);
+  }
+})();
 
 /**
  * Enfileira evento de memória

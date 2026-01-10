@@ -237,4 +237,107 @@ router.delete('/knowledge/:id', authenticate, asyncHandler(async (req, res) => {
   res.json({ message: 'Knowledge item deleted' });
 }));
 
+/**
+ * @route POST /api/v1/ai/few-shot/sync
+ * @desc Sync few-shot learning examples (alias for /api/v1/examples/sync)
+ */
+router.post('/few-shot/sync', authenticate, asyncHandler(async (req, res) => {
+  const { examples: clientExamples = [] } = req.body;
+  const workspaceId = req.workspaceId;
+  const userId = req.userId;
+
+  logger.info(`[FewShot] Syncing ${clientExamples.length} examples for workspace ${workspaceId}`);
+
+  // Inserir exemplos do cliente que não existem
+  let inserted = 0;
+  for (const ex of clientExamples) {
+    const existing = db.get(
+      'SELECT id FROM training_examples WHERE id = ? AND workspace_id = ?',
+      [ex.id, workspaceId]
+    );
+
+    if (!existing) {
+      db.run(`
+        INSERT INTO training_examples
+        (id, workspace_id, user_id, input, output, context, category, tags, usage_count, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      `, [
+        ex.id || uuidv4(),
+        workspaceId,
+        userId,
+        ex.input,
+        ex.output,
+        ex.context || '',
+        ex.category || 'Geral',
+        JSON.stringify(ex.tags || []),
+        ex.usageCount || 0
+      ]);
+      inserted++;
+    }
+  }
+
+  // Retornar todos os exemplos do servidor
+  const serverExamples = db.all(`
+    SELECT id, input, output, context, category, tags, usage_count, created_at, updated_at
+    FROM training_examples
+    WHERE workspace_id = ?
+    ORDER BY usage_count DESC
+    LIMIT 100
+  `, [workspaceId]);
+
+  const formattedExamples = serverExamples.map(ex => ({
+    ...ex,
+    tags: ex.tags ? JSON.parse(ex.tags) : [],
+    usageCount: ex.usage_count
+  }));
+
+  logger.info(`[FewShot] Sync complete: ${inserted} inserted, ${formattedExamples.length} total`);
+
+  res.json({
+    success: true,
+    examples: formattedExamples,
+    synced: clientExamples.length,
+    inserted,
+    total: formattedExamples.length
+  });
+}));
+
+/**
+ * @route GET /api/v1/ai/few-shot
+ * @desc Get few-shot learning examples
+ */
+router.get('/few-shot', authenticate, asyncHandler(async (req, res) => {
+  const { category, limit = 100 } = req.query;
+  const workspaceId = req.workspaceId;
+
+  let query = `
+    SELECT id, input, output, context, category, tags, usage_count, created_at, updated_at
+    FROM training_examples
+    WHERE workspace_id = ?
+  `;
+  const params = [workspaceId];
+
+  if (category) {
+    query += ' AND category = ?';
+    params.push(category);
+  }
+
+  query += ' ORDER BY usage_count DESC, updated_at DESC LIMIT ?';
+  params.push(parseInt(limit));
+
+  const examples = db.all(query, params);
+
+  const formattedExamples = examples.map(ex => ({
+    ...ex,
+    tags: ex.tags ? JSON.parse(ex.tags) : [],
+    usageCount: ex.usage_count
+  }));
+
+  res.json({
+    success: true,
+    examples: formattedExamples,
+    total: formattedExamples.length
+  });
+}));
+
 module.exports = router;

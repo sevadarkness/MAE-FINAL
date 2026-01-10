@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('../utils/uuid-wrapper');
 const db = require('../utils/database');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const { authenticate } = require('../middleware/auth');
+const { checkSubscription, checkLimit } = require('../middleware/subscription');
 
 router.get('/', authenticate, asyncHandler(async (req, res) => {
   const campaigns = db.all(
@@ -26,7 +27,7 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   res.json({ campaign });
 }));
 
-router.post('/', authenticate, asyncHandler(async (req, res) => {
+router.post('/', authenticate, checkSubscription('campaigns'), checkLimit('campaigns'), asyncHandler(async (req, res) => {
   const { name, description, type, template_id, target_contacts, settings, scheduled_at } = req.body;
 
   // Validação mínima (padronizada via AppError + details)

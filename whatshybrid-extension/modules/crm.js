@@ -110,11 +110,40 @@
     if (state.initialized) return;
     await loadData();
     state.initialized = true;
+
+    // Iniciar sincronização periódica
+    startPeriodicSync();
+
     console.log('[CRM] ✅ Módulo inicializado com', state.contacts.length, 'contatos e', state.deals.length, 'negócios');
+    console.log('[CRM] 🔄 Sincronização periódica ativada (a cada 5 minutos)');
   }
 
   async function loadData() {
-    return new Promise(resolve => {
+    return new Promise(async (resolve) => {
+      // Primeiro, tentar carregar do backend
+      try {
+        const response = await syncWithBackend();
+        if (response && response.success) {
+          const data = response.data;
+          state.contacts = data.contacts || [];
+          state.deals = data.deals || [];
+          state.pipeline = data.pipeline || DEFAULT_PIPELINE;
+          state.activities = []; // activities não são sincronizadas com backend por enquanto
+
+          // Salvar local como cache
+          await saveToLocalStorage();
+          console.log('[CRM] ✅ Dados carregados do backend:', {
+            contacts: state.contacts.length,
+            deals: state.deals.length
+          });
+          resolve();
+          return;
+        }
+      } catch (error) {
+        console.warn('[CRM] ⚠️ Falha ao carregar do backend, usando cache local:', error.message);
+      }
+
+      // Fallback: carregar do storage local
       chrome.storage.local.get([STORAGE_KEY], result => {
         if (result[STORAGE_KEY]) {
           state.contacts = result[STORAGE_KEY].contacts || [];
@@ -124,22 +153,131 @@
         } else {
           state.pipeline = DEFAULT_PIPELINE;
         }
+        console.log('[CRM] ℹ️ Dados carregados do cache local');
         resolve();
       });
     });
   }
 
-  async function saveData() {
+  async function saveToLocalStorage() {
     return new Promise(resolve => {
       chrome.storage.local.set({
         [STORAGE_KEY]: {
           contacts: state.contacts,
           deals: state.deals,
           activities: state.activities,
-          pipeline: state.pipeline
+          pipeline: state.pipeline,
+          lastSync: new Date().toISOString()
         }
       }, resolve);
     });
+  }
+
+  async function saveData() {
+    // Salvar local primeiro (para funcionar offline)
+    await saveToLocalStorage();
+
+    // Tentar sincronizar com backend em background
+    try {
+      await syncWithBackend();
+      console.log('[CRM] ✅ Dados sincronizados com backend');
+    } catch (error) {
+      console.warn('[CRM] ⚠️ Falha ao sincronizar com backend:', error.message);
+      // Não bloqueia a operação - dados estão salvos localmente
+    }
+  }
+
+  async function syncWithBackend() {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const result = await chrome.storage.local.get(['whl_backend_url', 'whl_auth_token']);
+        const backendUrl = result.whl_backend_url;
+        const token = result.whl_auth_token;
+
+        if (!backendUrl || !token) {
+          reject(new Error('Backend não configurado'));
+          return;
+        }
+
+        // Preparar dados para envio
+        const payload = {
+          contacts: state.contacts.map(c => ({
+            id: c.id,
+            phone: c.phone,
+            name: c.name,
+            email: c.email,
+            company: c.company,
+            notes: c.notes,
+            tags: c.tags,
+            labels: c.labels,
+            stage: c.stage,
+            customFields: c.customFields,
+            status: c.status || 'active',
+            createdAt: c.createdAt,
+            updatedAt: c.updatedAt
+          })),
+          deals: state.deals.map(d => ({
+            id: d.id,
+            contactId: d.contactId,
+            title: d.title,
+            description: d.description,
+            value: d.value,
+            stage: d.stage,
+            probability: d.probability,
+            tags: d.tags,
+            customFields: d.customFields,
+            createdAt: d.createdAt,
+            updatedAt: d.updatedAt
+          })),
+          pipeline: state.pipeline,
+          lastSync: new Date().toISOString()
+        };
+
+        const response = await fetch(`${backendUrl}/api/v1/crm/sync`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        // Mesclar dados do servidor
+        if (data.success && data.data) {
+          // Usar dados do servidor como fonte da verdade
+          state.contacts = data.data.contacts || state.contacts;
+          state.deals = data.data.deals || state.deals;
+          if (data.data.pipeline) {
+            state.pipeline = data.data.pipeline;
+          }
+        }
+
+        resolve(data);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  // Sincronização periódica (a cada 5 minutos)
+  let syncInterval = null;
+  function startPeriodicSync() {
+    if (syncInterval) return;
+
+    syncInterval = setInterval(async () => {
+      try {
+        await syncWithBackend();
+        console.log('[CRM] 🔄 Sincronização periódica concluída');
+      } catch (error) {
+        console.warn('[CRM] ⚠️ Falha na sincronização periódica:', error.message);
+      }
+    }, 5 * 60 * 1000); // 5 minutos
   }
 
   // ==================== CONTATOS ====================
