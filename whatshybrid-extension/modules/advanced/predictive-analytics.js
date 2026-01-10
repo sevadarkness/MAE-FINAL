@@ -17,34 +17,152 @@
   class PredictiveAnalytics {
     constructor() {
       this.conversationData = [];
-      this.patterns = {};
+      this.patterns = new Map(); // SECURITY FIX: Use Map to prevent prototype pollution
       this.models = {};
       this.initialized = false;
+      this.errorLog = []; // SECURITY FIX P2-9: Internal error logging
+    }
+
+    // ============================================
+    // SECURITY HELPERS
+    // ============================================
+
+    /**
+     * Generate cryptographically secure ID
+     * SECURITY FIX P2-8: Replaces predictable Date.now()
+     */
+    _generateSecureId() {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        const arr = new Uint8Array(16);
+        crypto.getRandomValues(arr);
+        return Array.from(arr, byte => byte.toString(16).padStart(2, '0')).join('');
+      }
+      return `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+
+    /**
+     * Validate category input
+     * SECURITY FIX P0-2: Input validation
+     */
+    _validateCategory(cat) {
+      const validCategories = ['sales', 'support', 'billing', 'inquiry', 'complaint', 'other'];
+      return validCategories.includes(cat) ? cat : 'other';
+    }
+
+    /**
+     * Validate sentiment score
+     * SECURITY FIX P0-2: Input validation
+     */
+    _validateSentiment(sentiment) {
+      const score = parseFloat(sentiment);
+      if (isNaN(score)) return 0;
+      return Math.max(-1, Math.min(1, score));
+    }
+
+    /**
+     * Validate outcome
+     * SECURITY FIX P0-2: Input validation
+     */
+    _validateOutcome(outcome) {
+      const validOutcomes = ['sale', 'support_resolved', 'abandoned', 'pending', 'escalated', 'other'];
+      return validOutcomes.includes(outcome) ? outcome : 'other';
+    }
+
+    /**
+     * Sanitize key to prevent prototype pollution
+     * SECURITY FIX P0-1: Prevent __proto__, constructor, prototype keys
+     */
+    _sanitizeKey(key) {
+      const str = String(key).replace(/[^a-z0-9_]/gi, '');
+      const dangerous = ['__proto__', 'constructor', 'prototype'];
+      if (dangerous.includes(str.toLowerCase())) {
+        return 'sanitized_key';
+      }
+      return str;
+    }
+
+    /**
+     * Log errors internally without console exposure
+     * SECURITY FIX P2-9: Information disclosure prevention
+     */
+    _logError(msg, details = null) {
+      this.errorLog.push({
+        msg,
+        details: details ? String(details).substring(0, 100) : null,
+        time: Date.now()
+      });
+      // Keep only last 50 errors
+      if (this.errorLog.length > 50) {
+        this.errorLog = this.errorLog.slice(-50);
+      }
+    }
+
+    /**
+     * Hash contact ID for privacy
+     * SECURITY FIX P1-4: Data privacy
+     */
+    _hashContactId(contactId) {
+      // Simple hash for privacy (not cryptographic, just obfuscation)
+      const str = String(contactId);
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+      }
+      return `hashed_${Math.abs(hash).toString(36)}`;
     }
 
     async init() {
       await this._loadData();
       this._trainModels();
       this.initialized = true;
-      console.log('[Predictive] Initialized with', this.conversationData.length, 'data points');
+      // SECURITY FIX P2-9: Remove console log in production
+      if (typeof DEBUG !== 'undefined' && DEBUG) {
+        console.log('[Predictive] Initialized');
+      }
     }
 
     async _loadData() {
       try {
         const data = await this._getStorage(CONFIG.STORAGE_KEY);
         if (data) {
-          this.conversationData = data.conversationData || [];
-          this.patterns = data.patterns || {};
+          // SECURITY FIX P1-5: Validate data types before assignment
+          this.conversationData = Array.isArray(data.conversationData) ? data.conversationData : [];
+
+          // SECURITY FIX: Convert object to Map to prevent prototype pollution
+          if (data.patterns && typeof data.patterns === 'object') {
+            this.patterns = new Map(Object.entries(data.patterns));
+          } else {
+            this.patterns = new Map();
+          }
         }
       } catch (e) {
-        console.warn('[Predictive] Load failed:', e);
+        // SECURITY FIX P1-5 & P2-9: Don't expose error details to console
+        this._logError('Failed to load data', e.message);
+        this.conversationData = [];
+        this.patterns = new Map();
       }
     }
 
     async _saveData() {
+      // SECURITY FIX P1-4: Sanitize data before storage
+      const sanitizedData = this.conversationData.slice(-5000).map(d => ({
+        ...d,
+        contactId: this._hashContactId(d.contactId) // Hash contact IDs for privacy
+      }));
+
+      // Convert Map to object for storage
+      const patternsObj = Object.fromEntries(this.patterns);
+
       await this._setStorage(CONFIG.STORAGE_KEY, {
-        conversationData: this.conversationData.slice(-5000),
-        patterns: this.patterns
+        conversationData: sanitizedData,
+        patterns: patternsObj,
+        version: 2,
+        savedAt: Date.now()
       });
     }
 
@@ -66,18 +184,25 @@
 
     /**
      * Registra dados de uma conversa
+     * SECURITY FIX P0-2: Input validation
      */
     recordConversation(data) {
+      // SECURITY FIX P0-2: Validate input data
+      if (!data || typeof data !== 'object') {
+        this._logError('Invalid data for recordConversation');
+        throw new Error('Invalid conversation data');
+      }
+
       const record = {
-        id: `conv_${Date.now()}`,
+        id: `conv_${this._generateSecureId()}`, // SECURITY FIX P2-8: Use secure ID
         timestamp: Date.now(),
-        contactId: data.contactId,
-        category: data.category,
-        sentiment: data.sentiment,
-        duration: data.duration,
-        messageCount: data.messageCount,
-        resolved: data.resolved,
-        outcome: data.outcome, // 'sale', 'support_resolved', 'abandoned', etc
+        contactId: String(data.contactId || '').substring(0, 100), // SECURITY FIX: Limit length
+        category: this._validateCategory(data.category), // SECURITY FIX P0-2: Validate
+        sentiment: this._validateSentiment(data.sentiment), // SECURITY FIX P0-2: Validate
+        duration: Math.max(0, parseInt(data.duration) || 0), // SECURITY FIX: Validate number
+        messageCount: Math.max(0, parseInt(data.messageCount) || 0), // SECURITY FIX: Validate number
+        resolved: Boolean(data.resolved), // SECURITY FIX: Ensure boolean
+        outcome: this._validateOutcome(data.outcome), // SECURITY FIX P0-2: Validate
         dayOfWeek: new Date().getDay(),
         hourOfDay: new Date().getHours()
       };
@@ -88,38 +213,42 @@
     }
 
     _updatePatterns(record) {
+      // SECURITY FIX P0-1: Use Map instead of object to prevent prototype pollution
       // Padrões por hora do dia
       const hourKey = `hour_${record.hourOfDay}`;
-      if (!this.patterns[hourKey]) {
-        this.patterns[hourKey] = { count: 0, outcomes: {} };
+      if (!this.patterns.has(hourKey)) {
+        this.patterns.set(hourKey, { count: 0, outcomes: {} });
       }
-      this.patterns[hourKey].count++;
-      this.patterns[hourKey].outcomes[record.outcome] = 
-        (this.patterns[hourKey].outcomes[record.outcome] || 0) + 1;
+      const hourPattern = this.patterns.get(hourKey);
+      hourPattern.count++;
+      hourPattern.outcomes[record.outcome] =
+        (hourPattern.outcomes[record.outcome] || 0) + 1;
 
       // Padrões por dia da semana
       const dayKey = `day_${record.dayOfWeek}`;
-      if (!this.patterns[dayKey]) {
-        this.patterns[dayKey] = { count: 0, avgDuration: 0 };
+      if (!this.patterns.has(dayKey)) {
+        this.patterns.set(dayKey, { count: 0, avgDuration: 0 });
       }
-      this.patterns[dayKey].count++;
-      this.patterns[dayKey].avgDuration = 
-        (this.patterns[dayKey].avgDuration * (this.patterns[dayKey].count - 1) + record.duration) / 
-        this.patterns[dayKey].count;
+      const dayPattern = this.patterns.get(dayKey);
+      dayPattern.count++;
+      dayPattern.avgDuration =
+        (dayPattern.avgDuration * (dayPattern.count - 1) + record.duration) /
+        dayPattern.count;
 
-      // Padrões por categoria
-      const catKey = `cat_${record.category}`;
-      if (!this.patterns[catKey]) {
-        this.patterns[catKey] = { count: 0, avgSentiment: 0, resolutionRate: 0 };
+      // Padrões por categoria (with sanitization)
+      const catKey = `cat_${this._sanitizeKey(record.category)}`; // SECURITY FIX P0-1
+      if (!this.patterns.has(catKey)) {
+        this.patterns.set(catKey, { count: 0, avgSentiment: 0, resolutionRate: 0 });
       }
-      this.patterns[catKey].count++;
-      this.patterns[catKey].avgSentiment = 
-        (this.patterns[catKey].avgSentiment * (this.patterns[catKey].count - 1) + record.sentiment) / 
-        this.patterns[catKey].count;
+      const catPattern = this.patterns.get(catKey);
+      catPattern.count++;
+      catPattern.avgSentiment =
+        (catPattern.avgSentiment * (catPattern.count - 1) + record.sentiment) /
+        catPattern.count;
       if (record.resolved) {
-        this.patterns[catKey].resolutionRate = 
-          (this.patterns[catKey].resolutionRate * (this.patterns[catKey].count - 1) + 1) / 
-          this.patterns[catKey].count;
+        catPattern.resolutionRate =
+          (catPattern.resolutionRate * (catPattern.count - 1) + 1) /
+          catPattern.count;
       }
     }
 
@@ -154,7 +283,18 @@
      * Prediz o resultado provável de uma conversa
      */
     predictOutcome(context) {
-      const { category, sentiment, messageCount, hourOfDay, dayOfWeek } = context;
+      // SECURITY FIX P0-3: Validate and sanitize input context
+      if (!context || typeof context !== 'object') {
+        throw new Error('Invalid context');
+      }
+
+      // Validate and sanitize all inputs
+      const category = this._validateCategory(context.category);
+      const sentiment = this._validateSentiment(context.sentiment);
+      const messageCount = Math.max(0, parseInt(context.messageCount) || 0);
+      const hourOfDay = Math.max(0, Math.min(23, parseInt(context.hourOfDay) || 0));
+      const dayOfWeek = Math.max(0, Math.min(6, parseInt(context.dayOfWeek) || 0));
+
       const predictions = {};
 
       // Base probabilities
@@ -162,8 +302,9 @@
         predictions[outcome] = prob;
       }
 
-      // Ajustar por hora do dia
-      const hourPattern = this.patterns[`hour_${hourOfDay}`];
+      // Ajustar por hora do dia (using Map with sanitized key)
+      const hourKey = `hour_${hourOfDay}`;
+      const hourPattern = this.patterns.get(hourKey); // SECURITY FIX: Use Map.get()
       if (hourPattern) {
         for (const [outcome, count] of Object.entries(hourPattern.outcomes)) {
           const hourProb = count / hourPattern.count;
@@ -171,8 +312,9 @@
         }
       }
 
-      // Ajustar por categoria
-      const catPattern = this.patterns[`cat_${category}`];
+      // Ajustar por categoria (using Map with sanitized key)
+      const catKey = `cat_${this._sanitizeKey(category)}`; // SECURITY FIX P0-1
+      const catPattern = this.patterns.get(catKey); // SECURITY FIX: Use Map.get()
       if (catPattern) {
         if (sentiment < -0.3) {
           predictions['abandoned'] = (predictions['abandoned'] || 0) + 0.2;
@@ -182,15 +324,32 @@
         }
       }
 
-      // Normalizar
+      // SECURITY FIX P2-11: Normalize with division-by-zero protection
       const total = Object.values(predictions).reduce((a, b) => a + b, 0);
-      for (const outcome of Object.keys(predictions)) {
-        predictions[outcome] = predictions[outcome] / total;
+
+      if (total === 0) {
+        // Assign uniform distribution if no predictions
+        const numOutcomes = Object.keys(predictions).length || 1;
+        for (const outcome of Object.keys(predictions)) {
+          predictions[outcome] = 1 / numOutcomes;
+        }
+      } else {
+        for (const outcome of Object.keys(predictions)) {
+          predictions[outcome] = predictions[outcome] / total;
+        }
       }
 
       // Encontrar mais provável
-      const mostLikely = Object.entries(predictions)
-        .sort((a, b) => b[1] - a[1])[0];
+      const entries = Object.entries(predictions);
+      if (entries.length === 0) {
+        return {
+          predictions: {},
+          mostLikely: { outcome: 'unknown', probability: 0 },
+          confidence: 0
+        };
+      }
+
+      const mostLikely = entries.sort((a, b) => b[1] - a[1])[0];
 
       return {
         predictions,
@@ -201,10 +360,24 @@
 
     /**
      * Prediz volume de conversas
+     * SECURITY FIX P2-10: Input validation
      */
     predictVolume(dayOfWeek, hourOfDay) {
-      const hourPattern = this.patterns[`hour_${hourOfDay}`];
-      const dayPattern = this.patterns[`day_${dayOfWeek}`];
+      // SECURITY FIX P2-10: Validate inputs with bounds checking
+      dayOfWeek = Math.max(0, Math.min(6, parseInt(dayOfWeek) || 0));
+      hourOfDay = Math.max(0, Math.min(23, parseInt(hourOfDay) || 0));
+
+      // Use Map.get() instead of bracket notation
+      const hourPattern = this.patterns.get(`hour_${hourOfDay}`);
+      const dayPattern = this.patterns.get(`day_${dayOfWeek}`);
+
+      if (!hourPattern || !dayPattern) {
+        return {
+          expectedVolume: 0,
+          peakHour: 0,
+          peakDay: 'Unknown'
+        };
+      }
 
       const hourAvg = hourPattern?.count / 7 || 0;
       const dayAvg = dayPattern?.count / 24 || 0;
@@ -273,27 +446,65 @@
     getStats() {
       return {
         totalDataPoints: this.conversationData.length,
-        patterns: Object.keys(this.patterns).length,
+        patterns: this.patterns.size, // SECURITY FIX: Use Map.size instead of Object.keys
         hasModel: Object.keys(this.models).length > 0,
         trends: this.getTrends()
       };
     }
 
-    exportData() {
+    /**
+     * Export data with access control
+     * SECURITY FIX P1-7: Add access control and filtering
+     */
+    exportData(options = {}) {
+      // SECURITY FIX P1-7: Add basic access control
+      // In production, this should check user permissions
+      const canExportSensitive = options.includeSensitive === true && this._validateExportAccess();
+
       return {
-        conversationData: this.conversationData,
-        patterns: this.patterns,
-        models: this.models,
         stats: this.getStats(),
-        exportedAt: new Date().toISOString()
+        // SECURITY FIX P1-7: Only export patterns if explicitly authorized
+        patterns: canExportSensitive ? Object.fromEntries(this.patterns) : {},
+        hasData: this.conversationData.length > 0,
+        exportedAt: new Date().toISOString(),
+        // Never export raw conversationData without explicit filtering
+        // conversationData: ... REMOVED FOR SECURITY
       };
+    }
+
+    /**
+     * Validate export access (placeholder for real auth)
+     * SECURITY FIX P1-7: Access control
+     */
+    _validateExportAccess() {
+      // In production, this should check actual user permissions
+      // For now, return false by default (deny access to sensitive data)
+      return false;
     }
   }
 
   const predictive = new PredictiveAnalytics();
   predictive.init();
 
-  window.WHLPredictive = predictive;
-  console.log('[ADV-004] Predictive Analytics initialized');
+  // SECURITY FIX P1-6: Expose only safe public API, not entire object
+  // Use Object.freeze to prevent modification
+  window.WHLPredictive = Object.freeze({
+    // Safe read-only methods
+    getStats: () => predictive.getStats(),
+    getTrends: () => predictive.getTrends(),
+    predictVolume: (day, hour) => predictive.predictVolume(day, hour),
+    predictOutcome: (context) => predictive.predictOutcome(context),
+
+    // DO NOT expose:
+    // - recordConversation (prevents data injection)
+    // - exportData (prevents data exfiltration)
+    // - Internal data (conversationData, patterns, models)
+    // - _private methods
+  });
+
+  // SECURITY FIX P2-9: Remove debug console log in production
+  if (typeof DEBUG !== 'undefined' && DEBUG) {
+    console.log('[ADV-004] Predictive Analytics initialized');
+  }
 
 })();
