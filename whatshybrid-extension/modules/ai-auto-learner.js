@@ -19,6 +19,67 @@
   const LEARNING_INTERVAL = 5 * 60 * 1000; // 5 minutos
   const MAX_PENDING_LEARNINGS = 100;
 
+  // ============================================
+  // 🛡️ SECURITY: Training Data Sanitization
+  // ============================================
+
+  /**
+   * Sanitizes training data to prevent data poisoning attacks
+   * @param {string} text - Text to sanitize
+   * @param {number} maxLength - Maximum length (default 2000)
+   * @returns {string} - Sanitized text
+   */
+  function sanitizeTrainingData(text, maxLength = 2000) {
+    if (!text || typeof text !== 'string') return '';
+
+    let clean = String(text);
+
+    // Remove control characters and zero-width spaces
+    clean = clean.replace(/[\x00-\x1F\x7F\u200B-\u200D\uFEFF]/g, '');
+
+    // Remove dangerous command injection patterns
+    const dangerousPatterns = [
+      /ignore\s+(all\s+)?(previous\s+)?(instructions?|commands?|rules?)/gi,
+      /you\s+are\s+now/gi,
+      /system\s*:/gi,
+      /admin\s*:/gi,
+      /override\s+(instructions?|settings?|config)/gi,
+      /execute\s+(command|code|script)/gi,
+      /(drop|delete|truncate)\s+(table|database)/gi,
+      /\bexec\b.*\(/gi,
+      /\beval\b.*\(/gi,
+      /<script[\s\S]*?<\/script>/gi,
+      /javascript\s*:/gi,
+      /on(load|error|click)\s*=/gi
+    ];
+
+    for (const pattern of dangerousPatterns) {
+      clean = clean.replace(pattern, '[FILTERED]');
+    }
+
+    // Limit length to prevent DoS via large training data
+    if (clean.length > maxLength) {
+      clean = clean.substring(0, maxLength) + '...';
+    }
+
+    // Remove excessive whitespace
+    clean = clean.replace(/\s{3,}/g, ' ').trim();
+
+    return clean;
+  }
+
+  /**
+   * Validates and sanitizes training example quality scores
+   * @param {number} quality - Quality score to validate
+   * @param {number} max - Maximum allowed quality (default 0.7)
+   * @returns {number} - Validated quality score
+   */
+  function validateQuality(quality, max = 0.7) {
+    const score = parseFloat(quality);
+    if (isNaN(score) || score < 0) return 0;
+    return Math.min(score, max);
+  }
+
   class AIAutoLearner {
     constructor() {
       this.pendingLearnings = [];
@@ -315,16 +376,21 @@
           
           // Adicionar como exemplo de treinamento
           if (window.fewShotLearning && satisfaction > 0.8) {
+            // SECURITY FIX (PARTIAL-011-P0.1): Sanitize training data to prevent poisoning
+            const sanitizedInput = sanitizeTrainingData(msg.body);
+            const sanitizedOutput = sanitizeTrainingData(nextMsg.body);
+            const safeQuality = validateQuality(satisfaction, 0.7); // Max 0.7 for auto-learned
+
             await window.fewShotLearning.addExample({
-              input: msg.body,
-              output: nextMsg.body,
+              input: sanitizedInput,
+              output: sanitizedOutput,
               context: {
                 chatId: item.chatId,
                 satisfaction
               },
-              quality: satisfaction
+              quality: safeQuality
             });
-            
+
             this.metrics.examplesAdded++;
           }
         }
@@ -336,20 +402,25 @@
      */
     async learnFromAcceptedSuggestion(item) {
       const { input, output, quality } = item;
-      
+
       // Adicionar como exemplo
       if (window.fewShotLearning) {
+        // SECURITY FIX (PARTIAL-011-P0.3): Sanitize accepted suggestions to prevent data poisoning
+        const sanitizedInput = sanitizeTrainingData(input);
+        const sanitizedOutput = sanitizeTrainingData(output);
+        const safeQuality = validateQuality(quality, 0.7); // Max 0.7 for auto-accepted
+
         await window.fewShotLearning.addExample({
-          input,
-          output,
+          input: sanitizedInput,
+          output: sanitizedOutput,
           context: item.context,
-          quality,
+          quality: safeQuality,
           source: 'auto_learner'
         });
-        
+
         this.metrics.examplesAdded++;
       }
-      
+
       // Atualizar padrões
       const patterns = await this.extractPatterns(input);
       for (const pattern of patterns) {
@@ -362,17 +433,27 @@
      */
     async learnFromCorrection(data) {
       const { original, corrected, context } = data;
-      
+
       // Adicionar correção como exemplo de alta qualidade
       if (window.fewShotLearning && context?.userMessage) {
+        // SECURITY FIX (PARTIAL-011-P0.2): Sanitize user corrections to prevent data poisoning
+        const sanitizedInput = sanitizeTrainingData(context.userMessage);
+        const sanitizedOutput = sanitizeTrainingData(corrected);
+
+        // Limit quality to 0.75 - human corrections still need validation
+        const safeQuality = validateQuality(0.75, 0.75);
+
         await window.fewShotLearning.addExample({
-          input: context.userMessage,
-          output: corrected,
-          context,
-          quality: 0.95, // Correção humana = alta qualidade
+          input: sanitizedInput,
+          output: sanitizedOutput,
+          context: {
+            ...context,
+            userMessage: sanitizedInput // Sanitize context too
+          },
+          quality: safeQuality,
           isCorrection: true
         });
-        
+
         this.metrics.correctionsLearned++;
       }
       
