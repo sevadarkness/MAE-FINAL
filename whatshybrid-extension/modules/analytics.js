@@ -355,9 +355,50 @@
     saveData();
   }
 
+  /**
+   * PEND-MED-010: Sincronizar telemetria com backend
+   */
+  async function syncTelemetry() {
+    try {
+      if (!window.BackendClient?.isConnected?.()) {
+        console.log('[Analytics] Backend não conectado, pulando sync telemetria');
+        return { success: false, reason: 'backend_not_connected' };
+      }
+
+      const payload = {
+        sessionId: state.sessionId,
+        totalMessages: state.data.totalMessages,
+        daily: state.data.daily,
+        hourly: state.data.hourly,
+        contacts: state.data.contacts,
+        campaigns: state.data.campaigns,
+        responseTimes: state.data.responseTimes
+      };
+
+      const response = await window.BackendClient.post('/api/v1/analytics/telemetry', payload);
+
+      if (response?.success) {
+        console.log('[Analytics] ✅ Telemetria sincronizada:', response.telemetryId);
+        return { success: true, telemetryId: response.telemetryId };
+      } else {
+        console.warn('[Analytics] ⚠️ Falha ao sincronizar telemetria:', response);
+        return { success: false, reason: 'backend_error' };
+      }
+    } catch (error) {
+      console.error('[Analytics] ❌ Erro ao sincronizar telemetria:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   function startAutoFlush() {
     if (autoFlushInterval) clearInterval(autoFlushInterval);
-    autoFlushInterval = setInterval(() => flushBuffer(), 10000); // Flush a cada 10s
+    autoFlushInterval = setInterval(() => {
+      flushBuffer();
+      // PEND-MED-010: Sincronizar telemetria a cada flush
+      syncTelemetry().catch(err => {
+        console.warn('[Analytics] Telemetry sync failed:', err);
+      });
+    }, 10000); // Flush a cada 10s
   }
 
   /**
@@ -851,7 +892,8 @@
     resetAll,
     exportData,
     exportToCSV,
-    exportToPDF
+    exportToPDF,
+    syncTelemetry
   };
 
 })();

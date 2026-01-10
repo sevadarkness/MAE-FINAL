@@ -67,4 +67,128 @@ router.get('/events', authenticate, asyncHandler(async (req, res) => {
   res.json({ events });
 }));
 
+/**
+ * PEND-MED-010: Telemetry endpoint para métricas da extensão
+ * Recebe dados de telemetria do AnalyticsModule da extensão
+ */
+router.post('/telemetry', authenticate, asyncHandler(async (req, res) => {
+  const {
+    sessionId,
+    totalMessages,
+    daily,
+    hourly,
+    contacts,
+    campaigns,
+    responseTimes
+  } = req.body;
+
+  try {
+    // Criar registro de telemetria
+    const telemetryId = uuidv4();
+    db.run(`
+      INSERT INTO analytics_telemetry (
+        id, workspace_id, user_id, session_id,
+        total_sent, total_failed, total_confirmed,
+        unique_contacts, total_campaigns,
+        data_snapshot, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `, [
+      telemetryId,
+      req.workspaceId,
+      req.userId,
+      sessionId,
+      totalMessages?.sent || 0,
+      totalMessages?.failed || 0,
+      totalMessages?.confirmed || 0,
+      contacts?.length || 0,
+      campaigns?.length || 0,
+      JSON.stringify({ daily, hourly, campaigns, responseTimes })
+    ]);
+
+    // Processar métricas diárias
+    if (daily && typeof daily === 'object') {
+      for (const [date, metrics] of Object.entries(daily)) {
+        const metricId = uuidv4();
+        db.run(`
+          INSERT OR REPLACE INTO analytics_daily_metrics (
+            id, workspace_id, date, messages_sent, messages_failed
+          ) VALUES (?, ?, ?, ?, ?)
+        `, [
+          metricId,
+          req.workspaceId,
+          date,
+          metrics.sent || 0,
+          metrics.failed || 0
+        ]);
+      }
+    }
+
+    // Processar campanhas
+    if (campaigns && Array.isArray(campaigns)) {
+      for (const campaign of campaigns) {
+        const eventId = uuidv4();
+        db.run(`
+          INSERT INTO analytics_events (
+            id, workspace_id, event_type, event_data, user_id, session_id
+          ) VALUES (?, ?, 'campaign_completed', ?, ?, ?)
+        `, [
+          eventId,
+          req.workspaceId,
+          JSON.stringify(campaign),
+          req.userId,
+          sessionId
+        ]);
+      }
+    }
+
+    res.json({
+      success: true,
+      telemetryId,
+      message: 'Telemetry data received and processed'
+    });
+
+  } catch (error) {
+    console.error('[Analytics] Telemetry error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process telemetry data'
+    });
+  }
+}));
+
+/**
+ * PEND-MED-010: Obter agregados de telemetria
+ */
+router.get('/telemetry/summary', authenticate, asyncHandler(async (req, res) => {
+  const { period = '7d' } = req.query;
+
+  const days = period === '30d' ? 30 : period === '90d' ? 90 : 7;
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const summary = db.get(`
+    SELECT
+      SUM(total_sent) as total_sent,
+      SUM(total_failed) as total_failed,
+      SUM(total_confirmed) as total_confirmed,
+      MAX(unique_contacts) as unique_contacts,
+      COUNT(DISTINCT session_id) as sessions
+    FROM analytics_telemetry
+    WHERE workspace_id = ? AND created_at >= ?
+  `, [req.workspaceId, startDate.toISOString()]);
+
+  const dailyMetrics = db.all(`
+    SELECT date, messages_sent, messages_failed
+    FROM analytics_daily_metrics
+    WHERE workspace_id = ? AND date >= ?
+    ORDER BY date ASC
+  `, [req.workspaceId, startDate.toISOString().split('T')[0]]);
+
+  res.json({
+    summary,
+    dailyMetrics,
+    period
+  });
+}));
+
 module.exports = router;
