@@ -23,7 +23,7 @@ try {
 }
 
 /**
- * GET /api/v1/ai/providers
+ * GET /api/v2/ai/providers
  * Lista providers configurados
  */
 router.get('/providers', authenticate, asyncHandler(async (req, res) => {
@@ -36,7 +36,7 @@ router.get('/providers', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/v1/ai/models
+ * GET /api/v2/ai/models
  * Lista todos os modelos disponíveis
  */
 router.get('/models', authenticate, asyncHandler(async (req, res) => {
@@ -49,7 +49,7 @@ router.get('/models', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/complete
+ * POST /api/v2/ai/complete
  * Chat completion
  */
 router.post('/complete', authenticate, asyncHandler(async (req, res) => {
@@ -92,7 +92,7 @@ router.post('/complete', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/analyze
+ * POST /api/v2/ai/analyze
  * Análise de mensagem (intent, sentiment, entities)
  */
 router.post('/analyze', authenticate, asyncHandler(async (req, res) => {
@@ -113,7 +113,7 @@ router.post('/analyze', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/replies
+ * POST /api/v2/ai/replies
  * Gera sugestões de resposta
  */
 router.post('/replies', authenticate, asyncHandler(async (req, res) => {
@@ -134,7 +134,7 @@ router.post('/replies', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/score
+ * POST /api/v2/ai/score
  * Lead scoring
  */
 router.post('/score', authenticate, asyncHandler(async (req, res) => {
@@ -153,7 +153,7 @@ router.post('/score', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/summarize
+ * POST /api/v2/ai/summarize
  * Resumo de conversa
  */
 router.post('/summarize', authenticate, asyncHandler(async (req, res) => {
@@ -172,7 +172,7 @@ router.post('/summarize', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/translate
+ * POST /api/v2/ai/translate
  * Tradução de texto
  */
 router.post('/translate', authenticate, asyncHandler(async (req, res) => {
@@ -191,7 +191,7 @@ router.post('/translate', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/correct
+ * POST /api/v2/ai/correct
  * Correção gramatical
  */
 router.post('/correct', authenticate, asyncHandler(async (req, res) => {
@@ -210,7 +210,7 @@ router.post('/correct', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/v1/ai/personas
+ * GET /api/v2/ai/personas
  * Lista personas disponíveis
  */
 router.get('/personas', authenticate, asyncHandler(async (req, res) => {
@@ -223,7 +223,7 @@ router.get('/personas', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/persona
+ * POST /api/v2/ai/persona
  * Define persona ativa
  */
 router.post('/persona', authenticate, asyncHandler(async (req, res) => {
@@ -246,7 +246,7 @@ router.post('/persona', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/v1/ai/health
+ * GET /api/v2/ai/health
  * Health check de todos os providers
  */
 router.get('/health', authenticate, asyncHandler(async (req, res) => {
@@ -259,7 +259,7 @@ router.get('/health', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/v1/ai/metrics
+ * GET /api/v2/ai/metrics
  * Métricas de uso
  */
 router.get('/metrics', authenticate, asyncHandler(async (req, res) => {
@@ -272,7 +272,7 @@ router.get('/metrics', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/configure
+ * POST /api/v2/ai/configure
  * Configura um provider
  */
 router.post('/configure', authenticate, asyncHandler(async (req, res) => {
@@ -295,7 +295,7 @@ router.post('/configure', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * POST /api/v1/ai/knowledge
+ * POST /api/v2/ai/knowledge
  * Adiciona item à knowledge base
  */
 router.post('/knowledge', authenticate, asyncHandler(async (req, res) => {
@@ -314,7 +314,7 @@ router.post('/knowledge', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * GET /api/v1/ai/knowledge/search
+ * GET /api/v2/ai/knowledge/search
  * Busca na knowledge base
  */
 router.get('/knowledge/search', authenticate, asyncHandler(async (req, res) => {
