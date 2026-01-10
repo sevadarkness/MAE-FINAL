@@ -47,6 +47,26 @@
       console.log('[Escalation] ✅ Sistema inicializado');
     }
 
+    /**
+     * SECURITY FIX P0-005: Check permissions for privileged operations
+     * Validates that current user has required permission before executing sensitive actions
+     */
+    _checkPermission(requiredPermission) {
+      // Check if RBAC system is available
+      if (typeof window.SecurityRBAC === 'undefined') {
+        console.error('[Escalation Security] RBAC system not available. Operation denied for safety.');
+        return false;
+      }
+
+      // Verify user has required permission
+      if (!window.SecurityRBAC.hasPermission(requiredPermission)) {
+        console.error(`[Escalation Security] Permission denied: ${requiredPermission} required`);
+        return false;
+      }
+
+      return true;
+    }
+
     // ============================================================
     // CRIAÇÃO E GERENCIAMENTO DE TICKETS
     // ============================================================
@@ -153,6 +173,11 @@
      * Atribuir ticket a um agente
      */
     assignTicket(ticketId, agentId) {
+      // SECURITY FIX P0-005: Require TEAM_MANAGE permission to assign tickets
+      if (!this._checkPermission('team:manage')) {
+        throw new Error('Permission denied: team:manage required to assign tickets');
+      }
+
       const ticket = this.queue.get(ticketId);
       if (!ticket) return null;
 
@@ -169,7 +194,7 @@
 
       this.saveQueue();
       this.notifyAgent(agentId, ticket);
-      
+
       console.log(`[Escalation] 👤 Ticket ${ticketId} atribuído a ${agentId}`);
       return ticket;
     }
@@ -224,6 +249,11 @@
      * Resolver ticket
      */
     resolveTicket(ticketId, resolution, agentId) {
+      // SECURITY FIX P0-006: Require TEAM_MANAGE permission to resolve tickets
+      if (!this._checkPermission('team:manage')) {
+        throw new Error('Permission denied: team:manage required to resolve tickets');
+      }
+
       const ticket = this.queue.get(ticketId);
       if (!ticket) return null;
 
@@ -260,6 +290,11 @@
      * Fechar ticket
      */
     closeTicket(ticketId, feedback = null) {
+      // SECURITY FIX P0-007: Require TEAM_MANAGE permission to close tickets
+      if (!this._checkPermission('team:manage')) {
+        throw new Error('Permission denied: team:manage required to close tickets');
+      }
+
       const ticket = this.queue.get(ticketId);
       if (!ticket) return null;
 
@@ -282,6 +317,11 @@
      * Reabrir ticket
      */
     reopenTicket(ticketId, reason) {
+      // SECURITY FIX P0-008: Require TEAM_MANAGE permission to reopen tickets
+      if (!this._checkPermission('team:manage')) {
+        throw new Error('Permission denied: team:manage required to reopen tickets');
+      }
+
       const ticket = this.queue.get(ticketId);
       if (!ticket) return null;
 
@@ -308,6 +348,11 @@
      * Adicionar regra de escalonamento
      */
     addRule(rule) {
+      // SECURITY FIX P0-009: Require SYSTEM_ADMIN permission to add escalation rules
+      if (!this._checkPermission('system:admin')) {
+        throw new Error('Permission denied: system:admin required to add escalation rules');
+      }
+
       const newRule = {
         id: this.generateRuleId(),
         name: rule.name,
@@ -456,6 +501,11 @@
      * Registrar agente
      */
     registerAgent(agentData) {
+      // SECURITY FIX P0-010: Require TEAM_MANAGE permission to register agents
+      if (!this._checkPermission('team:manage')) {
+        throw new Error('Permission denied: team:manage required to register agents');
+      }
+
       const agent = {
         id: agentData.id || this.generateAgentId(),
         name: agentData.name,
@@ -483,6 +533,11 @@
      * Atualizar status do agente
      */
     updateAgentStatus(agentId, status) {
+      // SECURITY FIX P0-011: Require TEAM_MANAGE permission to update agent status
+      if (!this._checkPermission('team:manage')) {
+        throw new Error('Permission denied: team:manage required to update agent status');
+      }
+
       const agent = this.agents.get(agentId);
       if (!agent) return null;
 
