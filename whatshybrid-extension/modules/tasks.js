@@ -366,17 +366,35 @@
   }
 
   /**
-   * Verificador de lembretes
+   * PEND-MED-007: Verificador de lembretes usando chrome.alarms
+   * Funciona mesmo com extension fechada (service worker)
    */
   function startReminderChecker() {
-    if (state.reminderIntervalId) return;
+    // NOVO: Usar chrome.alarms ao invés de setInterval
+    if (typeof chrome !== 'undefined' && chrome.alarms) {
+      // Criar alarm persistente que dispara a cada minuto
+      chrome.alarms.create('whl_task_reminder_check', {
+        delayInMinutes: 1,
+        periodInMinutes: 1
+      });
 
-    state.reminderIntervalId = setInterval(() => {
+      console.log('[Tasks] ✅ Reminder checker iniciado via chrome.alarms');
+
+      // Verificar imediatamente
       checkReminders();
-    }, 60000); // A cada minuto
+    } else {
+      // Fallback para setInterval (caso não esteja em service worker)
+      if (state.reminderIntervalId) return;
 
-    // Verificar imediatamente
-    checkReminders();
+      state.reminderIntervalId = setInterval(() => {
+        checkReminders();
+      }, 60000); // A cada minuto
+
+      console.log('[Tasks] ⚠️ Reminder checker iniciado via setInterval (fallback)');
+
+      // Verificar imediatamente
+      checkReminders();
+    }
   }
 
   /**

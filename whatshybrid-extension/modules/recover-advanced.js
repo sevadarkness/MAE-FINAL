@@ -1034,7 +1034,13 @@
     // v7.9.13: retorno detalhado (sem remover métodos existentes)
     // Mantém os 3 métodos (Store, mediaData, backend) e o fluxo de retry/backoff.
     if (!msg) {
-      return { success: false, errors: [{ method: 'validation', error: 'Mensagem inválida' }], summary: 'validation: Mensagem inválida' };
+      return {
+        success: false,
+        errors: [{ method: 'validation', error: 'Mensagem inválida' }],
+        summary: 'validation: Mensagem inválida',
+        errorType: 'INVALID_MESSAGE',
+        userMessage: 'Mensagem inválida para recuperação de mídia'
+      };
     }
 
     // CORREÇÃO 3.2: Verificar cache LRU primeiro
@@ -1062,7 +1068,27 @@
               }
             }
           } catch (e) {
-            errors.push({ method: 'store', attempt, error: e?.message || String(e) });
+            const errorMsg = e?.message || String(e);
+            errors.push({ method: 'store', attempt, error: errorMsg });
+
+            // Categorizar erro específico
+            if (errorMsg.includes('404') || errorMsg.includes('not found')) {
+              errors.push({
+                method: 'store',
+                attempt,
+                error: errorMsg,
+                errorType: 'MEDIA_NOT_FOUND',
+                userMessage: 'Mídia não encontrada nos servidores do WhatsApp (possivelmente revogada)'
+              });
+            } else if (errorMsg.includes('403') || errorMsg.includes('forbidden')) {
+              errors.push({
+                method: 'store',
+                attempt,
+                error: errorMsg,
+                errorType: 'MEDIA_FORBIDDEN',
+                userMessage: 'Acesso à mídia negado (mídia pode ter expirado)'
+              });
+            }
           }
         }
 
@@ -1085,20 +1111,51 @@
               return { success: true, data: data.base64, method: 'backend' };
             }
           } catch (e) {
-            errors.push({ method: 'backend', attempt, error: e?.message || String(e) });
+            const errorMsg = e?.message || String(e);
+            errors.push({ method: 'backend', attempt, error: errorMsg });
           }
         }
       } catch (e) {
-        console.warn(`[RecoverAdvanced] Download attempt ${attempt + 1} failed:`, e.message);
-        errors.push({ method: 'general', attempt, error: e?.message || String(e) });
+        const errorMsg = e?.message || String(e);
+        console.warn(`[RecoverAdvanced] Download attempt ${attempt + 1} failed:`, errorMsg);
+        errors.push({ method: 'general', attempt, error: errorMsg });
         if (attempt < CONFIG.RETRY_ATTEMPTS - 1) {
           await sleep(CONFIG.RETRY_DELAYS[attempt]);
         }
       }
     }
 
+    // Classificar tipo de erro e criar mensagem para usuário
+    let errorType = 'UNKNOWN';
+    let userMessage = 'Não foi possível recuperar a mídia após múltiplas tentativas';
+
+    const allErrors = errors.map(e => e.error).join(' ').toLowerCase();
+
+    if (allErrors.includes('404') || allErrors.includes('not found')) {
+      errorType = 'MEDIA_REVOKED';
+      userMessage = '❌ Mídia revogada: Esta mídia foi deletada dos servidores do WhatsApp e não pode ser recuperada. Recomendação: Ative o cache preventivo nas configurações para evitar perda de mídias futuras.';
+    } else if (allErrors.includes('403') || allErrors.includes('forbidden') || allErrors.includes('unauthorized')) {
+      errorType = 'MEDIA_EXPIRED';
+      userMessage = '⏱️ Mídia expirada: O link de acesso à mídia expirou. Mídias antigas podem não estar mais disponíveis para download.';
+    } else if (allErrors.includes('network') || allErrors.includes('timeout') || allErrors.includes('fetch')) {
+      errorType = 'NETWORK_ERROR';
+      userMessage = '🌐 Erro de rede: Falha na conexão com os servidores. Verifique sua internet e tente novamente.';
+    } else if (allErrors.includes('decrypt') || allErrors.includes('mediakey')) {
+      errorType = 'DECRYPTION_ERROR';
+      userMessage = '🔐 Erro de descriptografia: A chave de mídia está corrompida ou inválida.';
+    } else if (!msg.mediaKey && !msg.mediaData) {
+      errorType = 'NO_MEDIA_DATA';
+      userMessage = '📭 Sem dados de mídia: Esta mensagem não contém informações suficientes para recuperar a mídia.';
+    }
+
     const summary = errors.length ? errors.map(e => `${e.method}: ${e.error}`).join('; ') : 'Falha desconhecida';
-    return { success: false, errors, summary };
+    return {
+      success: false,
+      errors,
+      summary,
+      errorType,
+      userMessage
+    };
   }
 
   function blobToBase64(blob) {

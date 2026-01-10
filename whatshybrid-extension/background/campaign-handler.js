@@ -237,6 +237,49 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         await updateScheduleStatus(scheduleId, 'failed');
       }
     }
+
+    // PEND-MED-007: Handle task reminder alarm
+    if (alarm.name === 'whl_task_reminder_check') {
+      console.log('[WHL Background] ⏰ Task reminder check alarm fired');
+
+      try {
+        // Verificar lembretes de tarefas
+        const result = await chrome.storage.local.get('whl_tasks');
+        const tasks = result.whl_tasks || [];
+        const now = Date.now();
+
+        tasks.forEach(task => {
+          // Verificar se o lembrete está pronto para ser exibido
+          if (task.status === 'pending' || task.status === 'in_progress') {
+            if (task.reminderDate && !task.reminderShown) {
+              const reminderTime = new Date(task.reminderDate).getTime();
+
+              // 2 minutos de tolerância
+              if (reminderTime <= now && reminderTime > now - 120000) {
+                // Mostrar notificação
+                chrome.notifications.create(`whl_task_${task.id}`, {
+                  type: 'basic',
+                  iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+                  title: `⏰ Lembrete: ${task.title}`,
+                  message: task.description || 'Tarefa agendada',
+                  priority: task.priority === 'urgent' || task.priority === 'high' ? 2 : 1,
+                  requireInteraction: true
+                });
+
+                // Marcar como exibido
+                task.reminderShown = true;
+                console.log('[WHL Background] ✅ Reminder shown for task:', task.title);
+              }
+            }
+          }
+        });
+
+        // Salvar estado atualizado
+        await chrome.storage.local.set({ whl_tasks: tasks });
+      } catch (error) {
+        console.error('[WHL Background] ❌ Error checking task reminders:', error);
+      }
+    }
   } catch (error) {
     console.error('[WHL Background] Error handling alarm:', error);
   }

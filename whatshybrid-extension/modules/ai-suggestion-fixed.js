@@ -228,7 +228,27 @@
   function buildRobustPromptMessages({ chatId, transcript, lastUserMsg }) {
     const messages = [];
 
-    const baseRules = `Você é um assistente de atendimento no WhatsApp.\nObjetivo: responder rápido, claro, profissional e humano, sem inventar informações.\n\nRegras:\n- Nunca invente dados (preços, prazos, políticas). Se não souber, pergunte objetivamente ou diga que precisa confirmar.\n- Não peça dados sensíveis desnecessários.\n- Leia o histórico e responda à ÚLTIMA mensagem do cliente.\n- Seja direto e útil. Se necessário, use lista curta (máximo 4 itens).\n- Use linguagem natural em pt-BR.\n- Responda SOMENTE com o texto final pronto para enviar (sem markdown, sem explicações).`;
+    // Detecção de idioma via i18n
+    let languageInstruction = 'Use linguagem natural em pt-BR.';
+    let currentLang = 'pt-BR';
+    try {
+      if (window.i18nManager?.getCurrentLanguage) {
+        currentLang = window.i18nManager.getCurrentLanguage();
+        const langInstructions = {
+          'pt-BR': 'Use linguagem natural em pt-BR.',
+          'en-US': 'Use natural language in American English.',
+          'es-ES': 'Usa lenguaje natural en español.',
+          'fr-FR': 'Utilisez un langage naturel en français.',
+          'de-DE': 'Verwende natürliche Sprache auf Deutsch.'
+        };
+        languageInstruction = langInstructions[currentLang] || languageInstruction;
+        log(`🌍 Idioma detectado: ${currentLang}`);
+      }
+    } catch (e) {
+      log('⚠️ Detecção de idioma falhou, usando pt-BR');
+    }
+
+    const baseRules = `Você é um assistente de atendimento no WhatsApp.\nObjetivo: responder rápido, claro, profissional e humano, sem inventar informações.\n\nRegras:\n- Nunca invente dados (preços, prazos, políticas). Se não souber, pergunte objetivamente ou diga que precisa confirmar.\n- Não peça dados sensíveis desnecessários.\n- Leia o histórico e responda à ÚLTIMA mensagem do cliente.\n- Seja direto e útil. Se necessário, use lista curta (máximo 4 itens).\n- ${languageInstruction}\n- Responda SOMENTE com o texto final pronto para enviar (sem markdown, sem explicações).`;
 
     const systemParts = [baseRules];
 

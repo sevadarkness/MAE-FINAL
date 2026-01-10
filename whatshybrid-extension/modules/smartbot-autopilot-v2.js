@@ -35,6 +35,7 @@
     paused: false,
     processing: false,
     processingLock: false, // MUTEX para evitar race conditions
+    abortController: null, // PEND-MED-009: AbortController para kill switch instantâneo
     queue: [],
     processed: new Set(),
     blacklist: new Set(),
@@ -742,13 +743,19 @@
   async function processQueue() {
     if (!state.running || state.paused) return;
     if (state.queue.length === 0) return;
-    
+
+    // PEND-MED-009: Verificar se foi abortado
+    if (state.abortController?.signal.aborted) {
+      console.log('[Autopilot] ✋ Operação abortada pelo kill switch');
+      return;
+    }
+
     // CORREÇÃO v7.9.13: Usar AsyncMutex para prevenir race conditions
     if (processingMutex.isLocked) {
       console.log('[Autopilot] ⏳ Processamento já em andamento');
       return;
     }
-    
+
     await processingMutex.acquire();
     state.processing = true;
 
@@ -758,6 +765,12 @@
     try {
       if (!item || !item.id) return;
       if (state.processed.has(item.id)) return;
+
+      // PEND-MED-009: Verificar abort antes de processar
+      if (state.abortController?.signal.aborted) {
+        console.log('[Autopilot] ✋ Operação abortada - item não processado');
+        return;
+      }
 
       // Garantir chatId no item (necessário para blacklist e contexto)
       item.chatId = normalizeChatId(item.chatId || (item.phone ? `${item.phone}@c.us` : ''));
@@ -824,9 +837,21 @@
       if (!opened) throw new Error('Falha ao abrir chat');
       await sleep(1500);
 
+      // PEND-MED-009: Verificar abort antes de gerar resposta
+      if (state.abortController?.signal.aborted) {
+        console.log('[Autopilot] ✋ Operação abortada após abrir chat');
+        return;
+      }
+
       // Gerar resposta (backend soberano via CopilotEngine)
       const response = confidenceCheck.answer || await generateResponse(item);
       if (!response) throw new Error('Falha ao gerar resposta');
+
+      // PEND-MED-009: Verificar abort antes de enviar
+      if (state.abortController?.signal.aborted) {
+        console.log('[Autopilot] ✋ Operação abortada antes de enviar mensagem');
+        return;
+      }
 
       // Enviar
       const sent = await sendMessageViaInput(response);
@@ -1218,6 +1243,10 @@
     await stateMutex.acquire();
     try {
       if (state.running && CONFIG.enabled) return { success: false, reason: 'already_running' };
+
+      // PEND-MED-009: Criar novo AbortController para esta sessão
+      state.abortController = new AbortController();
+
       CONFIG.enabled = true;
       state.paused = false;
       state.running = true;
@@ -1270,6 +1299,14 @@
     await stateMutex.acquire();
     try {
       if (!CONFIG.enabled && !state.running) return { success: false, reason: 'not_running' };
+
+      // PEND-MED-009: Abortar operações em andamento instantaneamente
+      if (state.abortController) {
+        state.abortController.abort();
+        state.abortController = null;
+        console.log('[Autopilot] ✋ Kill switch ativado - operações abortadas');
+      }
+
       CONFIG.enabled = false;
       state.running = false;
       state.paused = false;

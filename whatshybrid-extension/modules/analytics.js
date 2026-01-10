@@ -576,6 +576,262 @@
     return JSON.parse(JSON.stringify(state.data));
   }
 
+  /**
+   * PEND-LOW-005: Exportar dados para CSV
+   */
+  function exportToCSV() {
+    try {
+      const overview = getOverview();
+      const dailyData = getDailyData();
+
+      // Cabeçalho
+      let csv = 'WhatsHybrid Pro - Analytics Export\n\n';
+      csv += 'OVERVIEW\n';
+      csv += 'Metric,Value\n';
+      csv += `Total Sent,${overview.totalSent}\n`;
+      csv += `Total Failed,${overview.totalFailed}\n`;
+      csv += `Total Confirmed,${overview.totalConfirmed}\n`;
+      csv += `Success Rate,${overview.successRate}%\n`;
+      csv += `Unique Contacts,${overview.uniqueContacts}\n`;
+      csv += `Total Campaigns,${overview.totalCampaigns}\n\n`;
+
+      // Dados diários
+      csv += 'DAILY DATA\n';
+      csv += 'Date,Sent,Failed\n';
+      dailyData.forEach(day => {
+        csv += `${day.date},${day.sent || 0},${day.failed || 0}\n`;
+      });
+
+      // Campaigns
+      csv += '\nCAMPAIGNS\n';
+      csv += 'Name,Start,End,Total,Sent,Failed\n';
+      const campaigns = getCampaigns();
+      campaigns.forEach(c => {
+        csv += `${c.name},${new Date(c.startedAt).toLocaleString()},${c.endedAt ? new Date(c.endedAt).toLocaleString() : 'Running'},${c.total},${c.sent},${c.failed}\n`;
+      });
+
+      // Download
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `whatshydrid-analytics-${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      console.log('[Analytics] ✅ CSV exportado com sucesso');
+      if (window.NotificationsModule?.toast) {
+        window.NotificationsModule.toast('📊 Analytics exportado (CSV)', 'success', 2000);
+      }
+      return true;
+    } catch (e) {
+      console.error('[Analytics] ❌ Erro ao exportar CSV:', e);
+      if (window.NotificationsModule?.toast) {
+        window.NotificationsModule.toast('❌ Erro ao exportar CSV', 'error', 2000);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * PEND-LOW-005: Exportar dados para PDF
+   */
+  async function exportToPDF() {
+    try {
+      const overview = getOverview();
+      const dailyData = getDailyData();
+      const campaigns = getCampaigns();
+      const bestHours = getBestHours();
+
+      // Criar HTML para conversão em PDF
+      const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>WhatsHybrid Pro - Analytics Report</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 40px;
+      max-width: 900px;
+      margin: 0 auto;
+      color: #1f2937;
+    }
+    h1 {
+      color: #10b981;
+      border-bottom: 3px solid #10b981;
+      padding-bottom: 10px;
+      margin-bottom: 30px;
+    }
+    h2 {
+      color: #3b82f6;
+      margin-top: 30px;
+      margin-bottom: 15px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .metric-card {
+      background: #f3f4f6;
+      padding: 20px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .metric-card .label {
+      font-size: 12px;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .metric-card .value {
+      font-size: 28px;
+      font-weight: bold;
+      color: #10b981;
+      margin-top: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    th {
+      background: #f9fafb;
+      font-weight: 600;
+      color: #374151;
+    }
+    tr:hover {
+      background: #f9fafb;
+    }
+    .footer {
+      margin-top: 40px;
+      text-align: center;
+      color: #9ca3af;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>📊 WhatsHybrid Pro - Analytics Report</h1>
+  <p><strong>Generated:</strong> ${new Date().toLocaleString()}</p>
+
+  <h2>Overview</h2>
+  <div class="metrics">
+    <div class="metric-card">
+      <div class="label">Total Sent</div>
+      <div class="value">${overview.totalSent}</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Success Rate</div>
+      <div class="value">${overview.successRate}%</div>
+    </div>
+    <div class="metric-card">
+      <div class="label">Unique Contacts</div>
+      <div class="value">${overview.uniqueContacts}</div>
+    </div>
+  </div>
+
+  <h2>Daily Performance (Last 7 Days)</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Sent</th>
+        <th>Failed</th>
+        <th>Success Rate</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${dailyData.slice(0, 7).map(day => `
+        <tr>
+          <td>${day.date}</td>
+          <td>${day.sent || 0}</td>
+          <td>${day.failed || 0}</td>
+          <td>${day.sent > 0 ? ((day.sent / (day.sent + (day.failed || 0))) * 100).toFixed(1) : 0}%</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <h2>Best Hours to Send</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Hour</th>
+        <th>Messages Sent</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${bestHours.slice(0, 5).map(h => `
+        <tr>
+          <td>${h.hour}:00</td>
+          <td>${h.count}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <h2>Campaign History</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Campaign</th>
+        <th>Started</th>
+        <th>Status</th>
+        <th>Sent</th>
+        <th>Failed</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${campaigns.slice(0, 10).map(c => `
+        <tr>
+          <td>${c.name}</td>
+          <td>${new Date(c.startedAt).toLocaleString()}</td>
+          <td>${c.endedAt ? '✅ Completed' : '⏳ Running'}</td>
+          <td>${c.sent}</td>
+          <td>${c.failed}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table>
+
+  <div class="footer">
+    <p>WhatsHybrid Pro v8.0.1 | Generated by Analytics Module</p>
+  </div>
+</body>
+</html>`;
+
+      // Criar blob e download
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `whatshybrid-analytics-${new Date().toISOString().split('T')[0]}.html`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      console.log('[Analytics] ✅ PDF/HTML exportado com sucesso');
+      if (window.NotificationsModule?.toast) {
+        window.NotificationsModule.toast('📊 Analytics exportado (HTML) - Abra e imprima como PDF', 'success', 3000);
+      }
+      return true;
+    } catch (e) {
+      console.error('[Analytics] ❌ Erro ao exportar PDF:', e);
+      if (window.NotificationsModule?.toast) {
+        window.NotificationsModule.toast('❌ Erro ao exportar PDF', 'error', 2000);
+      }
+      return false;
+    }
+  }
+
   window.addEventListener('beforeunload', () => {
     cleanupIntervals();
   });
@@ -593,7 +849,9 @@
     getCampaigns,
     renderDashboard,
     resetAll,
-    exportData
+    exportData,
+    exportToCSV,
+    exportToPDF
   };
 
 })();
