@@ -1179,9 +1179,11 @@
     // Mostrar nível de confiança se disponível
     if (confidenceEl && window.confidenceSystem) {
       const level = window.confidenceSystem.level || 'beginner';
-      const score = window.confidenceSystem.score || 0;
+      // SECURITY FIX (PARTIAL-006): Prevent XSS via type coercion
+      const score = Number(window.confidenceSystem.score || 0) || 0;
       const emoji = { autonomous: '🔵', copilot: '🟢', assisted: '🟡', learning: '🟠', beginner: '🔴' }[level] || '⚪';
-      confidenceEl.innerHTML = `${emoji} ${score}%`;
+      // SECURITY FIX (PARTIAL-006): Use textContent instead of innerHTML
+      confidenceEl.textContent = `${emoji} ${score}%`;
     }
   }
 
