@@ -156,6 +156,42 @@
   };
 
   // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-002: Sanitize storage data to prevent Prototype Pollution
+   * Removes dangerous keys (__proto__, constructor, prototype) from objects
+   */
+  function sanitizeStorageData(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        // Skip dangerous keys
+        if (dangerousKeys.includes(key)) {
+          console.warn(`[SubscriptionManager Security] Blocked prototype pollution attempt: ${key}`);
+          continue;
+        }
+
+        // Recursively sanitize nested objects
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeStorageData(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  // ============================================
   // ESTADO
   // ============================================
 
@@ -226,14 +262,18 @@
         CONFIG.creditsKey,
         CONFIG.usageKey
       ], result => {
+        // SECURITY FIX P0-002: Prevent Prototype Pollution via storage data
         if (result[CONFIG.storageKey]) {
-          state.subscription = { ...state.subscription, ...result[CONFIG.storageKey] };
+          const sanitized = sanitizeStorageData(result[CONFIG.storageKey]);
+          state.subscription = { ...state.subscription, ...sanitized };
         }
         if (result[CONFIG.creditsKey]) {
-          state.credits = { ...state.credits, ...result[CONFIG.creditsKey] };
+          const sanitized = sanitizeStorageData(result[CONFIG.creditsKey]);
+          state.credits = { ...state.credits, ...sanitized };
         }
         if (result[CONFIG.usageKey]) {
-          state.usage = { ...state.usage, ...result[CONFIG.usageKey] };
+          const sanitized = sanitizeStorageData(result[CONFIG.usageKey]);
+          state.usage = { ...state.usage, ...sanitized };
         }
 
         // Verificar reset diário
@@ -367,33 +407,12 @@
    * Validação offline (para desenvolvimento/teste)
    */
   function validateOffline(code) {
-    // 🔑 MASTER KEY - Acesso total sem limite de validade
-    const MASTER_KEY = 'Cristi@no123';
-    
-    if (code === MASTER_KEY) {
-      console.log('[SubscriptionManager] 🔓 Master Key ativada - Acesso total liberado');
-      return { 
-        success: true, 
-        planId: 'enterprise',
-        isMasterKey: true,
-        credits: 999999,
-        noExpiry: true
-      };
-    }
-
-    // Códigos de teste para desenvolvimento
-    const testCodes = {
-      'WHL-TEST-STARTER': { planId: 'starter' },
-      'WHL-TEST-PRO': { planId: 'pro' },
-      'WHL-TEST-ENTERPRISE': { planId: 'enterprise' },
-      'WHL-DEMO-7DAYS': { planId: 'pro', trial: true }
-    };
-
-    if (testCodes[code]) {
-      return { success: true, ...testCodes[code] };
-    }
-
-    return { success: false };
+    // SECURITY FIX P0-001: Removed hardcoded master key 'Cristi@no123' and test codes
+    // VULNERABILITY: Hardcoded credentials allowed unauthorized enterprise access + 999999 free credits
+    // FIX: Force all validation through secure server endpoint
+    // All subscription codes MUST be validated server-side for security
+    console.warn('[SubscriptionManager] Offline validation disabled for security. Server validation required.');
+    return { success: false, error: 'Server validation required for security' };
   }
 
   /**
