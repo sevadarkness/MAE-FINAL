@@ -44,6 +44,39 @@
 
   const STORAGE_KEY = 'whl_analytics_v2';
 
+  // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-024: Sanitize objects to prevent Prototype Pollution
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn('[Analytics Security] Blocked prototype pollution attempt:', key);
+          continue;
+        }
+
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeObject(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   /**
    * Inicializa o módulo
    */
@@ -57,7 +90,7 @@
 
     state.initialized = true;
     console.log('[Analytics] ✅ Módulo inicializado');
-    
+
     // Emitir evento
     if (window.EventBus) {
       window.EventBus.emit(window.WHL_EVENTS?.MODULE_LOADED, { module: 'analytics' });
@@ -71,7 +104,9 @@
     return new Promise(resolve => {
       chrome.storage.local.get([STORAGE_KEY], result => {
         if (result[STORAGE_KEY]) {
-          state.data = { ...state.data, ...result[STORAGE_KEY] };
+          // SECURITY FIX P0-024: Sanitize storage data to prevent Prototype Pollution
+          const sanitized = sanitizeObject(result[STORAGE_KEY]);
+          state.data = { ...state.data, ...sanitized };
         }
         resolve();
       });

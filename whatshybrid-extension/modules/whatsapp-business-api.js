@@ -57,6 +57,39 @@
   };
 
   // ═══════════════════════════════════════════════════════════════════
+  // SECURITY HELPERS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * SECURITY FIX P0-025: Sanitize objects to prevent Prototype Pollution
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn('[WhatsAppBusinessAPI Security] Blocked prototype pollution attempt:', key);
+          continue;
+        }
+
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeObject(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // ESTADO
   // ═══════════════════════════════════════════════════════════════════
   const state = {
@@ -88,8 +121,10 @@
     try {
       const stored = await chrome.storage.local.get(STORAGE_KEY);
       if (stored[STORAGE_KEY]) {
-        state.config = { ...state.config, ...stored[STORAGE_KEY].config };
-        state.stats = { ...state.stats, ...stored[STORAGE_KEY].stats };
+        // SECURITY FIX P0-025: Sanitize storage data to prevent Prototype Pollution
+        const sanitized = sanitizeObject(stored[STORAGE_KEY]);
+        state.config = { ...state.config, ...sanitized.config };
+        state.stats = { ...state.stats, ...sanitized.stats };
       }
     } catch (e) {
       console.error('[WhatsAppBusinessAPI] Erro ao carregar config:', e);
