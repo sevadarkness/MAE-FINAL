@@ -90,6 +90,55 @@
   };
 
   // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-021: Sanitize objects to prevent Prototype Pollution
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn('[DataSyncManager Security] Blocked prototype pollution attempt:', key);
+          continue;
+        }
+
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeObject(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * SECURITY FIX P0-022: Sanitize arrays of objects
+   */
+  function sanitizeArray(arr) {
+    if (!Array.isArray(arr)) {
+      return arr;
+    }
+
+    return arr.map(item => {
+      if (item && typeof item === 'object') {
+        return sanitizeObject(item);
+      }
+      return item;
+    });
+  }
+
+  // ============================================
   // ESTADO
   // ============================================
   const state = {
@@ -137,7 +186,8 @@
     try {
       const result = await chrome.storage.local.get(CONFIG.SYNC_STATE_KEY);
       if (result[CONFIG.SYNC_STATE_KEY]) {
-        state.lastSync = result[CONFIG.SYNC_STATE_KEY];
+        // SECURITY FIX P0-021: Sanitize data from storage to prevent Prototype Pollution
+        state.lastSync = sanitizeObject(result[CONFIG.SYNC_STATE_KEY]);
       }
     } catch (e) {
       console.warn('[DataSyncManager] Erro ao carregar estado de sync:', e);
@@ -419,13 +469,16 @@
         return backendItem;
         
       case CONFLICT_STRATEGIES.MERGE_FIELDS:
+        // SECURITY FIX P0-022: Sanitize backend data before merging to prevent Prototype Pollution
+        const sanitizedBackend = sanitizeObject(backendItem);
+
         // Mescla campos, preferindo valores não-nulos do backend
         const merged = { ...localItem };
-        for (const [key, value] of Object.entries(backendItem)) {
+        for (const [key, value] of Object.entries(sanitizedBackend)) {
           if (value !== null && value !== undefined) {
             // Se ambos têm o campo, usa o mais recente
             const localTs = getItemTimestamp(localItem);
-            const backendTs = getItemTimestamp(backendItem);
+            const backendTs = getItemTimestamp(sanitizedBackend);
             if (backendTs >= localTs) {
               merged[key] = value;
             }
@@ -434,7 +487,7 @@
         // Atualiza timestamp para o maior
         merged.updatedAt = Math.max(
           getItemTimestamp(localItem),
-          getItemTimestamp(backendItem)
+          getItemTimestamp(sanitizedBackend)
         );
         return merged;
         
@@ -451,6 +504,11 @@
   // ============================================
   async function mergeBackendData(moduleName, localKey, backendData, strategy = CONFLICT_STRATEGIES.LATEST_WINS) {
     try {
+      // SECURITY FIX P0-021: Sanitize backend data before merging
+      const sanitizedBackendData = Array.isArray(backendData)
+        ? sanitizeArray(backendData)
+        : sanitizeObject(backendData);
+
       // Obter dados locais
       const result = await chrome.storage.local.get(localKey);
       const localData = result[localKey];
@@ -458,10 +516,10 @@
       let mergedData;
       let conflictsResolved = 0;
 
-      if (Array.isArray(backendData)) {
+      if (Array.isArray(sanitizedBackendData)) {
         // Para arrays, mesclar por ID com resolução de conflitos
         const localArray = Array.isArray(localData) ? localData : [];
-        const backendArray = Array.isArray(backendData) ? backendData : [];
+        const backendArray = Array.isArray(sanitizedBackendData) ? sanitizedBackendData : [];
         
         const merged = new Map();
         const conflicts = [];
@@ -494,16 +552,16 @@
           console.log(`[DataSyncManager] ⚖️ ${moduleName}: ${conflictsResolved} conflitos resolvidos com estratégia '${strategy}'`);
         }
         
-      } else if (typeof backendData === 'object' && backendData !== null) {
+      } else if (typeof sanitizedBackendData === 'object' && sanitizedBackendData !== null) {
         // Para objetos, usar resolução de conflitos por campo
         if (localData && typeof localData === 'object') {
-          mergedData = resolveItemConflict(localData, backendData, CONFLICT_STRATEGIES.MERGE_FIELDS);
+          mergedData = resolveItemConflict(localData, sanitizedBackendData, CONFLICT_STRATEGIES.MERGE_FIELDS);
         } else {
-          mergedData = backendData;
+          mergedData = sanitizedBackendData;
         }
       } else {
         // Para valores primitivos, usar backend (mais recente)
-        mergedData = backendData;
+        mergedData = sanitizedBackendData;
       }
 
       // Salvar dados mesclados
@@ -617,13 +675,19 @@
       throw new Error('Dados de importação inválidos');
     }
 
-    for (const [moduleName, data] of Object.entries(importData.modules)) {
+    // SECURITY FIX P0-023: Sanitize imported modules to prevent Prototype Pollution
+    const sanitizedModules = sanitizeObject(importData.modules);
+
+    for (const [moduleName, data] of Object.entries(sanitizedModules)) {
       const moduleConfig = CONFIG.SYNC_MODULES[moduleName];
       if (!moduleConfig) continue;
 
       try {
-        await chrome.storage.local.set({ [moduleConfig.localKey]: data });
-        console.log(`[DataSyncManager] ✅ ${moduleName} importado`);
+        // Sanitize data based on type (array or object)
+        const sanitizedData = Array.isArray(data) ? sanitizeArray(data) : sanitizeObject(data);
+
+        await chrome.storage.local.set({ [moduleConfig.localKey]: sanitizedData });
+        console.log(`[DataSyncManager] ✅ ${moduleName} importado (sanitizado)`);
       } catch (e) {
         console.error(`[DataSyncManager] Erro ao importar ${moduleName}:`, e);
       }
