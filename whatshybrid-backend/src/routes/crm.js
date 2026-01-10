@@ -30,7 +30,8 @@ router.get('/deals/:id', authenticate, asyncHandler(async (req, res) => {
   if (!deal) throw new AppError('Deal not found', 404);
   deal.tags = JSON.parse(deal.tags || '[]');
   deal.custom_fields = JSON.parse(deal.custom_fields || '{}');
-  const tasks = db.all('SELECT * FROM tasks WHERE deal_id = ? ORDER BY due_date ASC', [deal.id]);
+  // SECURITY FIX (RISK-003): Adicionar workspace_id ao buscar tasks
+  const tasks = db.all('SELECT * FROM tasks WHERE deal_id = ? AND workspace_id = ? ORDER BY due_date ASC', [deal.id, req.workspaceId]);
   res.json({ deal, tasks });
 }));
 
@@ -42,7 +43,8 @@ router.post('/deals', authenticate, checkSubscription('deals'), checkLimit('deal
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, req.workspaceId, contact_id, title, description, value || 0, stage || 'lead', probability || 0, expected_close_date, assigned_to, JSON.stringify(tags || []), JSON.stringify(custom_fields || {}), req.userId]
   );
-  const deal = db.get('SELECT * FROM deals WHERE id = ?', [id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar deal criado
+  const deal = db.get('SELECT * FROM deals WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
   const io = req.app.get('io');
   io.to(`workspace:${req.workspaceId}`).emit('deal:created', deal);
   res.status(201).json({ deal });
@@ -68,7 +70,8 @@ router.put('/deals/:id', authenticate, asyncHandler(async (req, res) => {
   updates.push('updated_at = CURRENT_TIMESTAMP');
   values.push(req.params.id, req.workspaceId);
   db.run(`UPDATE deals SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
-  const deal = db.get('SELECT * FROM deals WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar deal atualizado
+  const deal = db.get('SELECT * FROM deals WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   const io = req.app.get('io');
   io.to(`workspace:${req.workspaceId}`).emit('deal:updated', deal);
   res.json({ deal });
@@ -90,7 +93,8 @@ router.post('/pipeline/stages', authenticate, asyncHandler(async (req, res) => {
   const { name, color, position } = req.body;
   const id = uuidv4();
   db.run('INSERT INTO pipeline_stages (id, workspace_id, name, color, position) VALUES (?, ?, ?, ?, ?)', [id, req.workspaceId, name, color, position || 0]);
-  const stage = db.get('SELECT * FROM pipeline_stages WHERE id = ?', [id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar stage criado
+  const stage = db.get('SELECT * FROM pipeline_stages WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
   res.status(201).json({ stage });
 }));
 
@@ -104,10 +108,11 @@ router.put('/pipeline/stages/:id', authenticate, asyncHandler(async (req, res) =
   if (updates.length === 0) {
     throw new AppError('No fields to update', 400);
   }
-  
+
   values.push(req.params.id, req.workspaceId);
   db.run(`UPDATE pipeline_stages SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
-  const stage = db.get('SELECT * FROM pipeline_stages WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar stage atualizado
+  const stage = db.get('SELECT * FROM pipeline_stages WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   res.json({ stage });
 }));
 
@@ -127,14 +132,16 @@ router.post('/labels', authenticate, asyncHandler(async (req, res) => {
   const { name, color, description } = req.body;
   const id = uuidv4();
   db.run('INSERT INTO labels (id, workspace_id, name, color, description) VALUES (?, ?, ?, ?, ?)', [id, req.workspaceId, name, color, description]);
-  const label = db.get('SELECT * FROM labels WHERE id = ?', [id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar label criado
+  const label = db.get('SELECT * FROM labels WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
   res.status(201).json({ label });
 }));
 
 router.put('/labels/:id', authenticate, asyncHandler(async (req, res) => {
   const { name, color, description } = req.body;
   db.run('UPDATE labels SET name = COALESCE(?, name), color = COALESCE(?, color), description = COALESCE(?, description) WHERE id = ? AND workspace_id = ?', [name, color, description, req.params.id, req.workspaceId]);
-  const label = db.get('SELECT * FROM labels WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar label atualizado
+  const label = db.get('SELECT * FROM labels WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   res.json({ label });
 }));
 

@@ -22,6 +22,87 @@
     BACKEND_URL: 'http://localhost:3000'
   };
 
+  // PEND-MED-006: Múltiplos seletores CSS para resiliência contra mudanças do WhatsApp
+  const SELECTORS = {
+    CHATLIST_HEADER: [
+      '[data-testid="chatlist-header"]',
+      '[data-testid="header"]',
+      'header[data-testid]',
+      '#pane-side header',
+      '.chatlist-header',
+      'div[role="banner"]'
+    ],
+    CONVERSATION_PANEL: [
+      '[data-testid="conversation-panel-messages"]',
+      '#main [role="application"]',
+      '[data-testid="conversation-panel-body"]',
+      '.message-list',
+      '#main .copyable-area',
+      'div[data-tab="8"]'
+    ],
+    RECALLED_MESSAGE: [
+      '[data-testid="recalled-message"]',
+      '.message-revoked',
+      'div[data-revoked="true"]',
+      'span[data-icon="recalled"]',
+      '.message-deleted',
+      'div[title*="deleted"]',
+      'div[title*="This message was deleted"]'
+    ],
+    MEDIA_THUMB: [
+      '[data-testid="image-thumb"]',
+      '[data-testid="video-thumb"]',
+      '[data-testid="audio-play"]',
+      '[data-testid="media-thumb"]',
+      'img[src*="blob:"]',
+      '.media-thumb',
+      '[role="img"]',
+      'video',
+      'audio'
+    ],
+    DOWNLOAD_BUTTON: [
+      '[data-testid="download"]',
+      '[data-testid="media-download"]',
+      '[aria-label*="Download"]',
+      '[aria-label*="Baixar"]',
+      'button[title*="Download"]',
+      'button[title*="Baixar"]',
+      'span[data-icon="download"]',
+      '.download-button'
+    ]
+  };
+
+  // Helper: Tenta múltiplos seletores até encontrar elemento
+  function findElement(selectors, parent = document) {
+    if (typeof selectors === 'string') selectors = [selectors];
+    for (const selector of selectors) {
+      try {
+        const el = parent.querySelector(selector);
+        if (el) return el;
+      } catch (e) {
+        // Seletor inválido, continuar
+      }
+    }
+    return null;
+  }
+
+  // Helper: Tenta múltiplos seletores e retorna todos elementos encontrados
+  function findElements(selectors, parent = document) {
+    if (typeof selectors === 'string') selectors = [selectors];
+    const found = [];
+    for (const selector of selectors) {
+      try {
+        const els = parent.querySelectorAll(selector);
+        if (els.length > 0) {
+          found.push(...Array.from(els));
+        }
+      } catch (e) {
+        // Seletor inválido, continuar
+      }
+    }
+    return found;
+  }
+
   // ============================================
   // BACKEND HELPERS (URL + AUTH UNIFICADOS)
   // - Evita hardcode de localhost em produção
@@ -946,7 +1027,8 @@
       }
       
       // Método 5: Tentar do DOM
-      const profileEl = document.querySelector('[data-testid="chatlist-header"] img');
+      const header = findElement(SELECTORS.CHATLIST_HEADER);
+      const profileEl = header?.querySelector('img');
       if (profileEl?.src) {
         const match = profileEl.src.match(/u=(\d+)/);
         if (match && isValidPhoneNumber(match[1])) {
@@ -1034,7 +1116,13 @@
     // v7.9.13: retorno detalhado (sem remover métodos existentes)
     // Mantém os 3 métodos (Store, mediaData, backend) e o fluxo de retry/backoff.
     if (!msg) {
-      return { success: false, errors: [{ method: 'validation', error: 'Mensagem inválida' }], summary: 'validation: Mensagem inválida' };
+      return {
+        success: false,
+        errors: [{ method: 'validation', error: 'Mensagem inválida' }],
+        summary: 'validation: Mensagem inválida',
+        errorType: 'INVALID_MESSAGE',
+        userMessage: 'Mensagem inválida para recuperação de mídia'
+      };
     }
 
     // CORREÇÃO 3.2: Verificar cache LRU primeiro
@@ -1062,7 +1150,27 @@
               }
             }
           } catch (e) {
-            errors.push({ method: 'store', attempt, error: e?.message || String(e) });
+            const errorMsg = e?.message || String(e);
+            errors.push({ method: 'store', attempt, error: errorMsg });
+
+            // Categorizar erro específico
+            if (errorMsg.includes('404') || errorMsg.includes('not found')) {
+              errors.push({
+                method: 'store',
+                attempt,
+                error: errorMsg,
+                errorType: 'MEDIA_NOT_FOUND',
+                userMessage: 'Mídia não encontrada nos servidores do WhatsApp (possivelmente revogada)'
+              });
+            } else if (errorMsg.includes('403') || errorMsg.includes('forbidden')) {
+              errors.push({
+                method: 'store',
+                attempt,
+                error: errorMsg,
+                errorType: 'MEDIA_FORBIDDEN',
+                userMessage: 'Acesso à mídia negado (mídia pode ter expirado)'
+              });
+            }
           }
         }
 
@@ -1085,20 +1193,51 @@
               return { success: true, data: data.base64, method: 'backend' };
             }
           } catch (e) {
-            errors.push({ method: 'backend', attempt, error: e?.message || String(e) });
+            const errorMsg = e?.message || String(e);
+            errors.push({ method: 'backend', attempt, error: errorMsg });
           }
         }
       } catch (e) {
-        console.warn(`[RecoverAdvanced] Download attempt ${attempt + 1} failed:`, e.message);
-        errors.push({ method: 'general', attempt, error: e?.message || String(e) });
+        const errorMsg = e?.message || String(e);
+        console.warn(`[RecoverAdvanced] Download attempt ${attempt + 1} failed:`, errorMsg);
+        errors.push({ method: 'general', attempt, error: errorMsg });
         if (attempt < CONFIG.RETRY_ATTEMPTS - 1) {
           await sleep(CONFIG.RETRY_DELAYS[attempt]);
         }
       }
     }
 
+    // Classificar tipo de erro e criar mensagem para usuário
+    let errorType = 'UNKNOWN';
+    let userMessage = 'Não foi possível recuperar a mídia após múltiplas tentativas';
+
+    const allErrors = errors.map(e => e.error).join(' ').toLowerCase();
+
+    if (allErrors.includes('404') || allErrors.includes('not found')) {
+      errorType = 'MEDIA_REVOKED';
+      userMessage = '❌ Mídia revogada: Esta mídia foi deletada dos servidores do WhatsApp e não pode ser recuperada. Recomendação: Ative o cache preventivo nas configurações para evitar perda de mídias futuras.';
+    } else if (allErrors.includes('403') || allErrors.includes('forbidden') || allErrors.includes('unauthorized')) {
+      errorType = 'MEDIA_EXPIRED';
+      userMessage = '⏱️ Mídia expirada: O link de acesso à mídia expirou. Mídias antigas podem não estar mais disponíveis para download.';
+    } else if (allErrors.includes('network') || allErrors.includes('timeout') || allErrors.includes('fetch')) {
+      errorType = 'NETWORK_ERROR';
+      userMessage = '🌐 Erro de rede: Falha na conexão com os servidores. Verifique sua internet e tente novamente.';
+    } else if (allErrors.includes('decrypt') || allErrors.includes('mediakey')) {
+      errorType = 'DECRYPTION_ERROR';
+      userMessage = '🔐 Erro de descriptografia: A chave de mídia está corrompida ou inválida.';
+    } else if (!msg.mediaKey && !msg.mediaData) {
+      errorType = 'NO_MEDIA_DATA';
+      userMessage = '📭 Sem dados de mídia: Esta mensagem não contém informações suficientes para recuperar a mídia.';
+    }
+
     const summary = errors.length ? errors.map(e => `${e.method}: ${e.error}`).join('; ') : 'Falha desconhecida';
-    return { success: false, errors, summary };
+    return {
+      success: false,
+      errors,
+      summary,
+      errorType,
+      userMessage
+    };
   }
 
   function blobToBase64(blob) {
@@ -1179,14 +1318,13 @@
       }
       
       // Method 3: Search in message list
-      const messageList = document.querySelector('[data-testid="conversation-panel-messages"]') ||
-                         document.querySelector('#main [role="application"]');
+      const messageList = findElement(SELECTORS.CONVERSATION_PANEL);
       if (messageList) {
         // Scroll up gradually to find message
         for (let i = 0; i < 10; i++) {
           messageList.scrollTop -= 500;
           await sleep(300);
-          
+
           const found = document.querySelector(`[data-id="${messageId}"]`);
           if (found) {
             found.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1254,21 +1392,16 @@
       
       if (msgElement) {
         // Find the media container
-        const mediaContainer = msgElement.querySelector('[data-testid="image-thumb"]') ||
-                              msgElement.querySelector('[data-testid="video-thumb"]') ||
-                              msgElement.querySelector('[data-testid="audio-play"]') ||
-                              msgElement.querySelector('img[src*="blob:"]');
-        
+        const mediaContainer = findElement(SELECTORS.MEDIA_THUMB, msgElement);
+
         if (mediaContainer) {
           // Click to open full view
           mediaContainer.click();
           await sleep(1000);
-          
+
           // Find download button in full view
-          const downloadBtn = document.querySelector('[data-testid="download"]') ||
-                             document.querySelector('[aria-label*="Download"]') ||
-                             document.querySelector('button[title*="Download"]');
-          
+          const downloadBtn = findElement(SELECTORS.DOWNLOAD_BUTTON);
+
           if (downloadBtn) {
             downloadBtn.click();
             return { success: true, method: 'dom_navigation', message: 'Download triggered' };
@@ -2433,8 +2566,8 @@
       // Method 2: Via DOM (visible messages)
       const container = document.querySelector(`[data-id="${chatId}"]`);
       if (container) {
-        const revokedEls = container.querySelectorAll('[data-testid="recalled-message"], .message-revoked');
-        
+        const revokedEls = findElements(SELECTORS.RECALLED_MESSAGE, container);
+
         for (const el of revokedEls) {
           const msgData = extractMessageFromElement(el);
           if (msgData) {

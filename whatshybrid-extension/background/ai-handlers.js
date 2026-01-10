@@ -292,8 +292,9 @@ async function handleFewShotSync(message, sender, sendResponse) {
     
     const examplesData = await chrome.storage.local.get(['whl_few_shot_examples']);
     const examples = examplesData.whl_few_shot_examples || [];
-    
-    const response = await fetch(`${backendUrl}/api/v1/ai/few-shot/sync`, {
+
+    // GHOST-002 FIX: Usar rota correta /api/v1/examples/sync ao invés de /api/v1/ai/few-shot/sync (ghost route)
+    const response = await fetch(`${backendUrl}/api/v1/examples/sync`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -35,7 +35,8 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
     'INSERT INTO templates (id, workspace_id, name, category, content, variables, media_url, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     [id, req.workspaceId, name, category, content, JSON.stringify(variables || []), media_url, req.userId]
   );
-  const template = db.get('SELECT * FROM templates WHERE id = ?', [id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar template criado
+  const template = db.get('SELECT * FROM templates WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
   template.variables = JSON.parse(template.variables);
   res.status(201).json({ template });
 }));
@@ -57,7 +58,8 @@ router.put('/:id', authenticate, asyncHandler(async (req, res) => {
   updates.push('updated_at = CURRENT_TIMESTAMP');
   values.push(req.params.id, req.workspaceId);
   db.run(`UPDATE templates SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
-  const template = db.get('SELECT * FROM templates WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar template atualizado
+  const template = db.get('SELECT * FROM templates WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   res.json({ template });
 }));
 

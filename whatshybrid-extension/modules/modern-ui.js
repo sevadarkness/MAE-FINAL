@@ -272,29 +272,38 @@
       [...this.activeModals].forEach(modal => this.close(modal));
     },
 
-    confirm(message, title = 'Confirmar') {
+    confirm(message, title = '') {
+      // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+      const defaultTitle = (typeof window.t === 'function') ? window.t('notifications.confirm') : 'Confirmar';
+      const cancelText = (typeof window.t === 'function') ? window.t('common.cancel') : 'Cancelar';
+      const confirmText = (typeof window.t === 'function') ? window.t('common.confirm') : 'Confirmar';
+
       return new Promise((resolve) => {
         this.show({
-          title,
+          title: title || defaultTitle,
           content: `<p style="margin: 0; font-size: 14px;">${message}</p>`,
           width: '400px',
           buttons: [
-            { text: 'Cancelar', action: 'cancel', onClick: () => resolve(false) },
-            { text: 'Confirmar', action: 'confirm', primary: true, onClick: () => resolve(true) }
+            { text: cancelText, action: 'cancel', onClick: () => resolve(false) },
+            { text: confirmText, action: 'confirm', primary: true, onClick: () => resolve(true) }
           ],
           onClose: () => resolve(false)
         });
       });
     },
 
-    alert(message, title = 'Aviso') {
+    alert(message, title = '') {
+      // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+      const defaultTitle = (typeof window.t === 'function') ? window.t('notifications.alert') : 'Aviso';
+      const okText = (typeof window.t === 'function') ? window.t('common.ok') : 'OK';
+      title = title || defaultTitle;
       return new Promise((resolve) => {
         this.show({
           title,
           content: `<p style="margin: 0; font-size: 14px;">${message}</p>`,
           width: '400px',
           buttons: [
-            { text: 'OK', action: 'ok', primary: true, onClick: () => resolve(true) }
+            { text: okText, action: 'ok', primary: true, onClick: () => resolve(true) }
           ],
           onClose: () => resolve(true)
         });

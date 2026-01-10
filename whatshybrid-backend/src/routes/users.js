@@ -78,14 +78,16 @@ router.put('/:id',
     }
 
     updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(req.params.id);
+    values.push(req.params.id, req.workspaceId);
 
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao UPDATE
     db.run(
-      `UPDATE users SET ${updates.join(', ')} WHERE id = ?`,
+      `UPDATE users SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`,
       values
     );
 
-    const user = db.get('SELECT id, email, name, avatar, phone, role, settings FROM users WHERE id = ?', [req.params.id]);
+    // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar user atualizado
+    const user = db.get('SELECT id, email, name, avatar, phone, role, settings FROM users WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
     user.settings = JSON.parse(user.settings || '{}');
 
     res.json({ message: 'User updated', user });
@@ -113,7 +115,8 @@ router.delete('/:id',
       throw new AppError('User not found', 404);
     }
 
-    db.run('DELETE FROM users WHERE id = ?', [req.params.id]);
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao DELETE
+    db.run('DELETE FROM users WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
 
     res.json({ message: 'User deleted' });
   })

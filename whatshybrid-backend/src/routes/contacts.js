@@ -82,22 +82,22 @@ router.get('/:id',
     contact.labels = JSON.parse(contact.labels || '[]');
     contact.custom_fields = JSON.parse(contact.custom_fields || '{}');
 
-    // Get conversations
+    // SECURITY FIX (RISK-003): Get conversations - adicionar workspace_id filter
     const conversations = db.all(
-      'SELECT * FROM conversations WHERE contact_id = ? ORDER BY last_message_at DESC LIMIT 10',
-      [contact.id]
+      'SELECT * FROM conversations WHERE contact_id = ? AND workspace_id = ? ORDER BY last_message_at DESC LIMIT 10',
+      [contact.id, req.workspaceId]
     );
 
-    // Get deals
+    // SECURITY FIX (RISK-003): Get deals - adicionar workspace_id filter
     const deals = db.all(
-      'SELECT * FROM deals WHERE contact_id = ? ORDER BY created_at DESC',
-      [contact.id]
+      'SELECT * FROM deals WHERE contact_id = ? AND workspace_id = ? ORDER BY created_at DESC',
+      [contact.id, req.workspaceId]
     );
 
-    // Get tasks
+    // SECURITY FIX (RISK-003): Get tasks - adicionar workspace_id filter
     const tasks = db.all(
-      'SELECT * FROM tasks WHERE contact_id = ? AND status != "completed" ORDER BY due_date ASC',
-      [contact.id]
+      'SELECT * FROM tasks WHERE contact_id = ? AND workspace_id = ? AND status != "completed" ORDER BY due_date ASC',
+      [contact.id, req.workspaceId]
     );
 
     res.json({ contact, conversations, deals, tasks });
@@ -150,7 +150,8 @@ router.post('/',
       ]
     );
 
-    const contact = db.get('SELECT * FROM contacts WHERE id = ?', [id]);
+    // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar contato criado
+    const contact = db.get('SELECT * FROM contacts WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
     contact.tags = JSON.parse(contact.tags);
     contact.labels = JSON.parse(contact.labels);
     contact.custom_fields = JSON.parse(contact.custom_fields);
@@ -197,14 +198,16 @@ router.put('/:id',
     }
 
     updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(req.params.id);
+    values.push(req.params.id, req.workspaceId);
 
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao UPDATE
     db.run(
-      `UPDATE contacts SET ${updates.join(', ')} WHERE id = ?`,
+      `UPDATE contacts SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`,
       values
     );
 
-    const updatedContact = db.get('SELECT * FROM contacts WHERE id = ?', [req.params.id]);
+    // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar contato atualizado
+    const updatedContact = db.get('SELECT * FROM contacts WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
     updatedContact.tags = JSON.parse(updatedContact.tags);
     updatedContact.labels = JSON.parse(updatedContact.labels);
     updatedContact.custom_fields = JSON.parse(updatedContact.custom_fields);
@@ -233,7 +236,8 @@ router.delete('/:id',
       throw new AppError('Contact not found', 404);
     }
 
-    db.run('DELETE FROM contacts WHERE id = ?', [req.params.id]);
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao DELETE
+    db.run('DELETE FROM contacts WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
 
     // Emit event
     const io = req.app.get('io');

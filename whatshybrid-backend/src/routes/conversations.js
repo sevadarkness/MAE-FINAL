@@ -71,7 +71,8 @@ router.get('/:id',
     conversation.tags = JSON.parse(conversation.tags || '[]');
     conversation.metadata = JSON.parse(conversation.metadata || '{}');
 
-    // Get messages
+    // SECURITY FIX (RISK-003): Validar messages via workspace_id da conversation
+    // Get messages - já garantido por conversation.workspace_id = req.workspaceId acima
     const messages = db.all(
       'SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC',
       [conversation.id]
@@ -106,11 +107,13 @@ router.post('/:id/messages',
       [messageId, req.params.id, 'user', req.userId, content, message_type, media_url]
     );
 
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao UPDATE
     db.run(
-      'UPDATE conversations SET last_message_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [req.params.id]
+      'UPDATE conversations SET last_message_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?',
+      [req.params.id, req.workspaceId]
     );
 
+    // SECURITY FIX (RISK-003): Messages pertencem a conversation já validada
     const message = db.get('SELECT * FROM messages WHERE id = ?', [messageId]);
 
     // Emit via Socket.IO
@@ -148,7 +151,8 @@ router.put('/:id',
       values
     );
 
-    const conversation = db.get('SELECT * FROM conversations WHERE id = ?', [req.params.id]);
+    // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar conversation atualizada
+    const conversation = db.get('SELECT * FROM conversations WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
 
     res.json({ conversation });
   })

@@ -23,6 +23,7 @@
   'use strict';
 
   const STORAGE_KEY = 'whl_knowledge_base';
+  const VERSION_HISTORY_KEY = 'whl_knowledge_versions'; // PEND-LOW-004: Version history storage
   const USAGE_STORAGE_KEY = 'whl_knowledge_usage';
   const WHL_DEBUG = (typeof localStorage !== 'undefined' && localStorage.getItem('whl_debug') === 'true');
 
@@ -144,7 +145,124 @@
      * Salva conhecimento atual
      */
     async save() {
+      // PEND-LOW-004: Criar snapshot da versão antes de salvar
+      await this.createVersionSnapshot('Auto-save');
       return this.saveKnowledge(this.knowledge);
+    }
+
+    /**
+     * PEND-LOW-004: Cria um snapshot da versão atual
+     * @param {string} description - Descrição da mudança
+     */
+    async createVersionSnapshot(description = 'Manual snapshot') {
+      try {
+        const snapshot = {
+          id: Date.now(),
+          timestamp: Date.now(),
+          description,
+          data: JSON.parse(JSON.stringify(this.knowledge)), // Deep clone
+          version: this.knowledge.version || '2.0.0',
+          userAgent: navigator.userAgent
+        };
+
+        // Carregar histórico existente
+        const result = await chrome.storage.local.get([VERSION_HISTORY_KEY]);
+        let history = result[VERSION_HISTORY_KEY] || [];
+
+        // Adicionar nova versão
+        history.push(snapshot);
+
+        // Manter apenas últimas 10 versões (evitar uso excessivo de storage)
+        if (history.length > 10) {
+          history = history.slice(-10);
+        }
+
+        // Salvar histórico
+        await chrome.storage.local.set({ [VERSION_HISTORY_KEY]: history });
+        console.log('[KnowledgeBase] ✅ Snapshot de versão criado:', description);
+
+        return snapshot.id;
+      } catch (error) {
+        console.error('[KnowledgeBase] ❌ Erro ao criar snapshot:', error);
+        return null;
+      }
+    }
+
+    /**
+     * PEND-LOW-004: Obtém histórico de versões
+     * @returns {Array} - Lista de versões
+     */
+    async getVersionHistory() {
+      try {
+        const result = await chrome.storage.local.get([VERSION_HISTORY_KEY]);
+        const history = result[VERSION_HISTORY_KEY] || [];
+
+        // Retornar apenas metadados (sem os dados completos)
+        return history.map(v => ({
+          id: v.id,
+          timestamp: v.timestamp,
+          description: v.description,
+          version: v.version,
+          date: new Date(v.timestamp).toLocaleString()
+        }));
+      } catch (error) {
+        console.error('[KnowledgeBase] ❌ Erro ao obter histórico:', error);
+        return [];
+      }
+    }
+
+    /**
+     * PEND-LOW-004: Restaura uma versão específica
+     * @param {number} versionId - ID da versão a restaurar
+     * @returns {boolean} - Sucesso
+     */
+    async restoreVersion(versionId) {
+      try {
+        const result = await chrome.storage.local.get([VERSION_HISTORY_KEY]);
+        const history = result[VERSION_HISTORY_KEY] || [];
+
+        const version = history.find(v => v.id === versionId);
+        if (!version) {
+          console.error('[KnowledgeBase] ❌ Versão não encontrada:', versionId);
+          return false;
+        }
+
+        // Criar snapshot do estado atual antes de restaurar
+        await this.createVersionSnapshot(`Backup antes de restaurar versão ${versionId}`);
+
+        // Restaurar dados da versão
+        await this.saveKnowledge(version.data);
+
+        console.log('[KnowledgeBase] ✅ Versão restaurada:', versionId);
+
+        if (window.NotificationsModule?.toast) {
+          window.NotificationsModule.toast('✅ Knowledge Base restaurada para versão anterior', 'success', 2500);
+        }
+
+        return true;
+      } catch (error) {
+        console.error('[KnowledgeBase] ❌ Erro ao restaurar versão:', error);
+
+        if (window.NotificationsModule?.toast) {
+          window.NotificationsModule.toast('❌ Erro ao restaurar versão', 'error', 2000);
+        }
+
+        return false;
+      }
+    }
+
+    /**
+     * PEND-LOW-004: Limpa histórico de versões
+     */
+    async clearVersionHistory() {
+      try {
+        await chrome.storage.local.remove(VERSION_HISTORY_KEY);
+        console.log('[KnowledgeBase] ✅ Histórico de versões limpo');
+        return true;
+      } catch (error) {
+        console.error('[KnowledgeBase] ❌ Erro ao limpar histórico:', error);
+        return false;
+      }
     }
 
     /**

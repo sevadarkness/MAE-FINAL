@@ -98,9 +98,10 @@ router.post('/ingest', authenticate, asyncHandler(async (req, res) => {
       messages = messages.slice(-100);
     }
     
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao UPDATE para defense-in-depth
     db.run(
-      'UPDATE ai_conversations SET messages = ?, updated_at = datetime(\'now\') WHERE id = ?',
-      [JSON.stringify(messages), existingConv.id]
+      'UPDATE ai_conversations SET messages = ?, updated_at = datetime(\'now\') WHERE id = ? AND workspace_id = ?',
+      [JSON.stringify(messages), existingConv.id, workspaceId]
     );
   } else {
     // Criar nova conversa
@@ -187,10 +188,11 @@ router.post('/memory', authenticate, asyncHandler(async (req, res) => {
       ...existingContext,
       memory: normalizedMemory
     };
-    
+
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao UPDATE para defense-in-depth
     db.run(
-      'UPDATE ai_conversations SET context = ?, updated_at = datetime(\'now\') WHERE id = ?',
-      [JSON.stringify(mergedContext), existing.id]
+      'UPDATE ai_conversations SET context = ?, updated_at = datetime(\'now\') WHERE id = ? AND workspace_id = ?',
+      [JSON.stringify(mergedContext), existing.id, workspaceId]
     );
   } else {
     // Criar novo registro
@@ -367,12 +369,14 @@ router.post('/conversation', authenticate, asyncHandler(async (req, res) => {
   );
   
   if (existing) {
+    // SECURITY FIX (RISK-003): Adicionar workspace_id ao UPDATE para defense-in-depth
     db.run(
-      'UPDATE ai_conversations SET messages = ?, context = ?, updated_at = datetime(\'now\') WHERE id = ?',
+      'UPDATE ai_conversations SET messages = ?, context = ?, updated_at = datetime(\'now\') WHERE id = ? AND workspace_id = ?',
       [
         JSON.stringify(normalizedMessages.slice(-100)), // Manter últimas 100
         JSON.stringify(metadata),
-        existing.id
+        existing.id,
+        workspaceId
       ]
     );
   } else {

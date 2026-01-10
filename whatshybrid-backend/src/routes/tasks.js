@@ -50,7 +50,8 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, req.workspaceId, title, description, type || 'todo', priority || 'medium', due_date, contact_id, deal_id, assigned_to || req.userId, req.userId]
   );
-  const task = db.get('SELECT * FROM tasks WHERE id = ?', [id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task criada
+  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
   const io = req.app.get('io');
   io.to(`workspace:${req.workspaceId}`).emit('task:created', task);
   res.status(201).json({ task });
@@ -78,7 +79,8 @@ router.put('/:id', authenticate, asyncHandler(async (req, res) => {
   updates.push('updated_at = CURRENT_TIMESTAMP');
   values.push(req.params.id, req.workspaceId);
   db.run(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
-  const task = db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task atualizada
+  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   const io = req.app.get('io');
   io.to(`workspace:${req.workspaceId}`).emit('task:updated', task);
   res.json({ task });
@@ -86,7 +88,8 @@ router.put('/:id', authenticate, asyncHandler(async (req, res) => {
 
 router.post('/:id/complete', authenticate, asyncHandler(async (req, res) => {
   db.run('UPDATE tasks SET status = "completed", completed_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
-  const task = db.get('SELECT * FROM tasks WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task completada
+  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   const io = req.app.get('io');
   io.to(`workspace:${req.workspaceId}`).emit('task:completed', task);
   res.json({ task });

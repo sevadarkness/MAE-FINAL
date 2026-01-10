@@ -67,6 +67,8 @@
         "utils/toggle-helper.js",
         "utils/notifications.js",
         "utils/metrics-dashboard.js",
+        "utils/sanitizer.js",
+        "utils/dom-monitor.js",
         "adapters/legacy-smartbot.js",
         "scripts/integrity-check.js",
         "scripts/pre-update-backup.js",
@@ -182,7 +184,8 @@
         "content/extractor-v6-optimized.js",
         "content/waextractor.v6.js",
         "content/label-button-injector.js",
-        "chatbackup/content.js"
+        "chatbackup/content.js",
+        "content-scripts/dom-monitor-init.js"
       ],
       "css": [
         "content/top-panel.css",

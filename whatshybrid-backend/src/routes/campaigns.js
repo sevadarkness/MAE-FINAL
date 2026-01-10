@@ -53,7 +53,8 @@ router.post('/', authenticate, checkSubscription('campaigns'), checkLimit('campa
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, req.workspaceId, name, description, type || 'broadcast', template_id, JSON.stringify(target_contacts || []), JSON.stringify(settings || {}), scheduled_at, req.userId]
   );
-  const campaign = db.get('SELECT * FROM campaigns WHERE id = ?', [id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar campaign criada
+  const campaign = db.get('SELECT * FROM campaigns WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
   const io = req.app.get('io');
   io.to(`workspace:${req.workspaceId}`).emit('campaign:created', campaign);
   res.status(201).json({ campaign });
@@ -80,7 +81,8 @@ router.put('/:id', authenticate, asyncHandler(async (req, res) => {
   updates.push('updated_at = CURRENT_TIMESTAMP');
   values.push(req.params.id, req.workspaceId);
   db.run(`UPDATE campaigns SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
-  const campaign = db.get('SELECT * FROM campaigns WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar campaign atualizada
+  const campaign = db.get('SELECT * FROM campaigns WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   const io = req.app.get('io');
   io.to(`workspace:${req.workspaceId}`).emit('campaign:updated', campaign);
   res.json({ campaign });

@@ -352,9 +352,9 @@ router.post('/faqs/search', authenticate, async (req, res) => {
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
     
-    // Incrementa views
+    // SECURITY FIX (RISK-003): Incrementa views com validação de workspace_id
     for (const faq of scored) {
-      await db.run('UPDATE faqs SET views = views + 1 WHERE id = ?', [faq.id]);
+      await db.run('UPDATE faqs SET views = views + 1 WHERE id = ? AND workspace_id = ?', [faq.id, workspaceId]);
     }
     
     res.json({
