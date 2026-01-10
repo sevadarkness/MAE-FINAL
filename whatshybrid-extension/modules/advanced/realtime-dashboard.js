@@ -344,11 +344,16 @@
       if (data.length === 0) return;
 
       const max = Math.max(...data, 1);
-      
-      chartEl.innerHTML = data.slice(-20).map(value => {
-        const height = (value / max * 100);
-        return `<div class="whl-mini-bar" style="height: ${height}%"></div>`;
-      }).join('');
+
+      // PARTIAL-002 FIX: XSS P0 - Usar createElement ao invés de innerHTML com dados dinâmicos
+      chartEl.innerHTML = ''; // Limpar primeiro
+      data.slice(-20).forEach(value => {
+        const div = document.createElement('div');
+        div.className = 'whl-mini-bar';
+        const height = Math.min(Math.max(parseFloat(value) / max * 100, 0), 100); // Validar range 0-100
+        div.style.height = `${height}%`;
+        chartEl.appendChild(div);
+      });
     }
 
     /**

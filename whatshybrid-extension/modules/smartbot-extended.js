@@ -30,6 +30,61 @@
   };
 
   // ============================================================
+  // 🛡️ SECURITY HELPERS - Prototype Pollution Protection
+  // ============================================================
+
+  /**
+   * Remove dangerous keys that can cause prototype pollution
+   * @param {object} obj - Object to sanitize
+   * @returns {object} - Clean object
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const clean = Object.create(null);
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn(`[Security] Blocked prototype pollution attempt: ${key}`);
+          continue;
+        }
+
+        // Recursively sanitize nested objects
+        if (obj[key] && typeof obj[key] === 'object') {
+          clean[key] = sanitizeObject(obj[key]);
+        } else {
+          clean[key] = obj[key];
+        }
+      }
+    }
+
+    return clean;
+  }
+
+  /**
+   * Validates key names to prevent prototype pollution
+   * @param {string} key - Key to validate
+   * @returns {boolean} - True if safe, false if dangerous
+   */
+  function isSafeKey(key) {
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const parts = String(key).split('.');
+
+    for (const part of parts) {
+      if (dangerousKeys.includes(part)) {
+        console.warn(`[Security] Blocked dangerous key: ${key}`);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  // ============================================================
   // 🎭 DIALOG MANAGER
   // Máquina de estados para gerenciar fluxos de conversa
   // ============================================================
@@ -1187,7 +1242,9 @@
         if (data[STORAGE_KEYS.ESCALATIONS]) {
           const parsed = JSON.parse(data[STORAGE_KEYS.ESCALATIONS]);
           this.escalationQueue = parsed.queue || [];
-          this.stats = { ...this.stats, ...parsed.stats };
+          // SECURITY FIX (PARTIAL-004): Prevent prototype pollution via spread operator
+          const sanitizedStats = sanitizeObject(parsed.stats || {});
+          this.stats = { ...this.stats, ...sanitizedStats };
         }
       } catch (e) {
         console.warn('[HumanAssistance] Erro ao carregar:', e);
@@ -1946,6 +2003,12 @@
      * Define valor no contexto
      */
     set(contextId, key, value, ttl = null) {
+      // SECURITY FIX (PARTIAL-004): Prevent prototype pollution via nested keys
+      if (!isSafeKey(key)) {
+        console.error(`[ContextManager] Blocked dangerous key: ${key}`);
+        return false;
+      }
+
       let context = this.contexts.get(contextId);
       if (!context) {
         context = {
@@ -1963,13 +2026,26 @@
       let current = context.data;
 
       for (let i = 0; i < keys.length - 1; i++) {
+        // SECURITY FIX (PARTIAL-004): Additional validation per key part
+        if (!isSafeKey(keys[i])) {
+          console.error(`[ContextManager] Blocked dangerous nested key: ${keys[i]}`);
+          return false;
+        }
+
         if (!current[keys[i]] || typeof current[keys[i]] !== 'object') {
           current[keys[i]] = {};
         }
         current = current[keys[i]];
       }
 
-      current[keys[keys.length - 1]] = value;
+      // SECURITY FIX (PARTIAL-004): Validate final key
+      const finalKey = keys[keys.length - 1];
+      if (!isSafeKey(finalKey)) {
+        console.error(`[ContextManager] Blocked dangerous final key: ${finalKey}`);
+        return false;
+      }
+
+      current[finalKey] = value;
 
       // Metadata com TTL
       context.metadata[key] = {
@@ -2052,7 +2128,16 @@
      * Mescla dados no contexto
      */
     merge(contextId, data, ttl = null) {
-      Object.entries(data).forEach(([key, value]) => {
+      // SECURITY FIX (PARTIAL-004): Sanitize data before merging to prevent prototype pollution
+      if (!data || typeof data !== 'object') {
+        console.error('[ContextManager] Invalid data for merge');
+        return;
+      }
+
+      const sanitizedData = sanitizeObject(data);
+
+      Object.entries(sanitizedData).forEach(([key, value]) => {
+        // set() already validates keys, but sanitizedData ensures no dangerous keys exist
         this.set(contextId, key, value, ttl);
       });
     }
@@ -2402,7 +2487,9 @@
         if (data[STORAGE_KEYS.FEEDBACK]) {
           const parsed = JSON.parse(data[STORAGE_KEYS.FEEDBACK]);
           this.feedbacks = parsed.feedbacks || [];
-          this.aggregates = { ...this.aggregates, ...parsed.aggregates };
+          // SECURITY FIX (PARTIAL-004): Prevent prototype pollution via spread operator
+          const sanitizedAggregates = sanitizeObject(parsed.aggregates || {});
+          this.aggregates = { ...this.aggregates, ...sanitizedAggregates };
         }
       } catch (e) {
         console.warn('[FeedbackAnalyzer] Erro ao carregar:', e);
