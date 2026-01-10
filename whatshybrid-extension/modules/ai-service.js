@@ -1079,8 +1079,10 @@ Diretrizes:
   }
 
   async function translateText(text, targetLanguage, options = {}) {
+    // SECURITY FIX (PARTIAL-010): Sanitize targetLanguage to prevent prompt injection
+    const safeTargetLanguage = sanitizeForPrompt(targetLanguage || 'português', 50);
     return complete([
-      { role: 'system', content: `Você é um tradutor. Traduza o texto para ${targetLanguage}. Retorne apenas a tradução, sem explicações.` },
+      { role: 'system', content: `Você é um tradutor. Traduza o texto para ${safeTargetLanguage}. Retorne apenas a tradução, sem explicações.` },
       { role: 'user', content: text }
     ], options);
   }
@@ -1093,8 +1095,19 @@ Diretrizes:
   }
 
   async function extractJSON(text, schema, options = {}) {
+    // SECURITY FIX (PARTIAL-010): Sanitize schema values to prevent prompt injection
+    const sanitizedSchema = {};
+    for (const [key, value] of Object.entries(schema || {})) {
+      // Only allow simple string values in schema, sanitize them
+      if (typeof value === 'string') {
+        sanitizedSchema[key] = sanitizeForPrompt(value, 100);
+      } else {
+        sanitizedSchema[key] = String(value).substring(0, 20); // Limit to safe length
+      }
+    }
+
     const result = await complete([
-      { role: 'system', content: `Extraia informações do texto e retorne um JSON válido seguindo este schema: ${JSON.stringify(schema)}. Retorne APENAS o JSON, sem markdown ou explicações.` },
+      { role: 'system', content: `Extraia informações do texto e retorne um JSON válido seguindo este schema: ${JSON.stringify(sanitizedSchema)}. Retorne APENAS o JSON, sem markdown ou explicações.` },
       { role: 'user', content: text }
     ], options);
 
