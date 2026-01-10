@@ -83,7 +83,8 @@ router.post('/', authenticate, asyncHandler(async (req, res) => {
     'INSERT INTO webhooks (id, workspace_id, name, url, events, headers, secret) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [id, req.workspaceId, name, url, JSON.stringify(events || []), JSON.stringify(headers || {}), secret]
   );
-  const webhook = db.get('SELECT * FROM webhooks WHERE id = ?', [id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar webhook criado
+  const webhook = db.get('SELECT * FROM webhooks WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
   webhook.events = JSON.parse(webhook.events);
   webhook.headers = JSON.parse(webhook.headers);
   res.status(201).json({ webhook });
@@ -105,7 +106,8 @@ router.put('/:id', authenticate, asyncHandler(async (req, res) => {
   updates.push('updated_at = CURRENT_TIMESTAMP');
   values.push(req.params.id, req.workspaceId);
   db.run(`UPDATE webhooks SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
-  const webhook = db.get('SELECT * FROM webhooks WHERE id = ?', [req.params.id]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar webhook atualizado
+  const webhook = db.get('SELECT * FROM webhooks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
   res.json({ webhook });
 }));
 
