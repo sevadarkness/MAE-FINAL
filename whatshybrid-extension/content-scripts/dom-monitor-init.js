@@ -32,11 +32,17 @@
 
     const monitor = getDOMMonitor();
 
+    // FIX PEND-MED-010: Check user consent before enabling telemetry
+    const consentData = await chrome.storage.local.get('whl_telemetry_consent');
+    const telemetryEnabled = consentData.whl_telemetry_consent === true;
+
     // Configurar e iniciar
     monitor.start({
-      telemetry: true,
+      telemetry: telemetryEnabled, // Respect user consent
       checkInterval: 30000 // Check a cada 30s
     });
+
+    console.log('[Init] Telemetry:', telemetryEnabled ? 'ENABLED' : 'DISABLED (no consent)');
 
     console.log('[Init] ✅ DOM Monitor ativo');
 

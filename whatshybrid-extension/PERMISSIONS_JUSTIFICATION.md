@@ -78,9 +78,17 @@ A extensão coleta e armazena localmente:
 1. **Mensagens recuperadas** - Armazenadas no dispositivo do usuário
 2. **Contatos do CRM** - Dados inseridos manualmente pelo usuário
 3. **Exemplos de treinamento** - Criados pelo usuário para personalizar a IA
-4. **Métricas de uso** - Apenas para analytics locais, não enviados a servidores
+4. **Métricas de uso** - Armazenadas localmente. Opcionalmente enviadas ao backend para análise agregada **apenas se o usuário consentir explicitamente** (números de telefone são anonimizados antes do envio)
 
 **Nenhum dado é enviado para servidores externos sem consentimento explícito do usuário.**
+
+### Telemetria (Opcional, Requer Consentimento)
+
+Se o usuário optar por habilitar telemetria:
+- **Dados enviados**: Métricas agregadas de uso (total de mensagens, horários de pico, tempos de resposta)
+- **Dados PII anonimizados**: Números de telefone são hash antes do envio (não reversível)
+- **Controle total**: Usuário pode desabilitar a qualquer momento via `AnalyticsModule.setTelemetryConsent(false)`
+- **Padrão**: Telemetria DESABILITADA por padrão (opt-in, não opt-out)
 
 ---
 
