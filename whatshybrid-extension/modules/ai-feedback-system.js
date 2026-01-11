@@ -56,7 +56,16 @@
       try {
         const data = await chrome.storage.local.get(STORAGE_KEY);
         if (data[STORAGE_KEY]) {
-          const stored = JSON.parse(data[STORAGE_KEY]);
+          // SECURITY FIX (PARTIAL-012): Prevent prototype pollution via JSON.parse reviver
+          const stored = JSON.parse(data[STORAGE_KEY], (key, value) => {
+            // Filter dangerous keys that can cause prototype pollution
+            if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+              console.warn('[AIFeedbackSystem] Blocked prototype pollution attempt:', key);
+              return undefined;
+            }
+            return value;
+          });
+
           this.feedbackHistory = stored.feedbackHistory || [];
           this.implicitSignals = stored.implicitSignals || [];
           this.aggregatedMetrics = stored.aggregatedMetrics || this.aggregatedMetrics;

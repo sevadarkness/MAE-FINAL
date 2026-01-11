@@ -25,15 +25,128 @@
     BATCH_SIZE: 10,           // Mensagens por batch
     FLUSH_INTERVAL: 30000,    // Intervalo de flush (30s)
     MAX_QUEUE_SIZE: 500,      // Máximo de mensagens na fila
-    
+
     // Retry
     MAX_RETRIES: 3,
     RETRY_DELAY: 5000,
-    
+
     // Storage
     STORAGE_KEY: 'whl_message_queue',
     SETTINGS_KEY: 'whl_capture_settings'
   };
+
+  // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-027: Sanitize objects to prevent Prototype Pollution
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn('[MessageCapture Security] Blocked prototype pollution attempt:', key);
+          continue;
+        }
+
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeObject(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * SECURITY FIX P0-028: Validate and sanitize message data before training ingestion
+   * Prevents Training Data Poisoning attacks
+   */
+  function sanitizeMessageData(msgData) {
+    if (!msgData || typeof msgData !== 'object') {
+      return null;
+    }
+
+    // Sanitize for prototype pollution
+    const sanitized = sanitizeObject(msgData);
+
+    // Additional validation for training data
+    const validated = {
+      id: String(sanitized.id || Date.now()),
+      chatId: String(sanitized.chatId || ''),
+      message: String(sanitized.message || '').slice(0, 10000), // Limit message length
+      sender: String(sanitized.sender || '').slice(0, 100),
+      contactName: String(sanitized.contactName || '').slice(0, 100),
+      groupName: sanitized.groupName ? String(sanitized.groupName).slice(0, 100) : null,
+      type: ['text', 'image', 'video', 'audio', 'document', 'sticker', 'location', 'contacts'].includes(sanitized.type)
+        ? sanitized.type
+        : 'text',
+      isFromMe: Boolean(sanitized.isFromMe),
+      replyTo: sanitized.replyTo && typeof sanitized.replyTo === 'object'
+        ? {
+            id: String(sanitized.replyTo.id || ''),
+            body: String(sanitized.replyTo.body || '').slice(0, 1000)
+          }
+        : null,
+      mediaType: sanitized.mediaType ? String(sanitized.mediaType).slice(0, 100) : null,
+      timestamp: Number(sanitized.timestamp) || Date.now(),
+      action: ['new', 'revoked', 'edited'].includes(sanitized.action) ? sanitized.action : 'new'
+    };
+
+    return validated;
+  }
+
+  /**
+   * SECURITY FIX P0-030: Validate backend URL to prevent SSRF/URL Injection
+   */
+  function validateBackendUrl(url) {
+    if (!url || typeof url !== 'string') {
+      throw new Error('Invalid backend URL: must be a string');
+    }
+
+    try {
+      const parsed = new URL(url);
+
+      // Only allow HTTP/HTTPS protocols
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error(`Invalid backend URL protocol: ${parsed.protocol}. Only HTTP/HTTPS allowed.`);
+      }
+
+      // Block localhost and private IPs in production
+      const hostname = parsed.hostname.toLowerCase();
+
+      // Allow localhost only for development
+      const isLocalhost = ['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(hostname);
+
+      // Block private IP ranges (for security in production)
+      const isPrivateIP =
+        hostname.startsWith('10.') ||
+        hostname.startsWith('192.168.') ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+        hostname.startsWith('169.254.'); // Cloud metadata
+
+      if (!isLocalhost && isPrivateIP) {
+        console.warn('[MessageCapture Security] Blocking private IP address:', hostname);
+        throw new Error('Backend URL cannot point to private IP ranges');
+      }
+
+      // Return validated URL (without trailing slash)
+      return parsed.origin + parsed.pathname.replace(/\/$/, '');
+
+    } catch (e) {
+      throw new Error(`Invalid backend URL: ${e.message}`);
+    }
+  }
 
   // Estado interno
   const state = {
@@ -120,7 +233,9 @@
     try {
       const data = await chrome.storage.local.get(CONFIG.SETTINGS_KEY);
       if (data[CONFIG.SETTINGS_KEY]) {
-        state.settings = { ...state.settings, ...data[CONFIG.SETTINGS_KEY] };
+        // SECURITY FIX P0-027: Sanitize storage data to prevent Prototype Pollution
+        const sanitized = sanitizeObject(data[CONFIG.SETTINGS_KEY]);
+        state.settings = { ...state.settings, ...sanitized };
       }
     } catch (e) {
       console.warn('[MessageCapture] Erro ao carregar settings:', e);
@@ -478,12 +593,20 @@
     if (!state.settings.enabled) return;
     if (!msgData || !msgData.chatId) return;
 
+    // SECURITY FIX P0-028: Sanitize and validate message data before adding to training queue
+    // Prevents Training Data Poisoning attacks
+    const sanitized = sanitizeMessageData(msgData);
+    if (!sanitized) {
+      console.warn('[MessageCapture] Mensagem inválida ignorada');
+      return;
+    }
+
     // Verificar duplicatas (por id)
-    const exists = state.queue.some(m => m.id === msgData.id);
+    const exists = state.queue.some(m => m.id === sanitized.id);
     if (exists) return;
 
     // Adicionar à fila
-    state.queue.push(msgData);
+    state.queue.push(sanitized);
     state.stats.captured++;
 
     // Limitar tamanho da fila
@@ -493,7 +616,7 @@
 
     // Emitir evento local
     if (window.EventBus) {
-      window.EventBus.emit('capture:message', msgData);
+      window.EventBus.emit('capture:message', sanitized);
     }
 
     // Flush se batch cheio
@@ -501,7 +624,7 @@
       flushQueue();
     }
 
-    console.log('[MessageCapture] 📩 Mensagem capturada:', msgData.id?.substring(0, 8) || '?');
+    console.log('[MessageCapture] 📩 Mensagem capturada (sanitizada):', sanitized.id?.substring(0, 8) || '?');
   }
 
   /**
@@ -541,9 +664,23 @@
         } catch (_) {}
       }
 
-      backendUrl = String(backendUrl || settings?.backend_url || 'http://localhost:3000').replace(/\/$/, '');
+      // SECURITY FIX P0-030: Validate backend URL to prevent SSRF/URL Injection
+      const rawUrl = backendUrl || settings?.backend_url || 'http://localhost:3000';
+
+      try {
+        backendUrl = validateBackendUrl(rawUrl);
+      } catch (e) {
+        console.error('[MessageCapture Security] Invalid backend URL:', e.message);
+        state.queue.unshift(...batch);
+        await saveQueue();
+        state.isProcessing = false;
+        return;
+      }
+
       token = token || settings?.backend_token || null;
 
+      // SECURITY NOTE P0-029: Backend token stored in plaintext in chrome.storage.local
+      // RECOMMENDATION: Use chrome.storage.session (encrypted) or secure token management for production
       if (!token) {
         // Sem token, manter na fila local
         state.queue.unshift(...batch);
@@ -610,9 +747,11 @@
    * Atualiza configurações
    */
   function configure(options) {
-    state.settings = { ...state.settings, ...options };
+    // SECURITY FIX P0-027: Sanitize options to prevent Prototype Pollution
+    const sanitized = sanitizeObject(options);
+    state.settings = { ...state.settings, ...sanitized };
     saveSettings();
-    console.log('[MessageCapture] ⚙️ Configurações atualizadas');
+    console.log('[MessageCapture] ⚙️ Configurações atualizadas (sanitizadas)');
   }
 
   /**

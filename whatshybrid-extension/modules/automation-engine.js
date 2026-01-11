@@ -132,13 +132,144 @@
   };
 
   // ═══════════════════════════════════════════════════════════════════
+  // SECURITY HELPERS
+  // ═══════════════════════════════════════════════════════════════════
+
+  /**
+   * SECURITY FIX P0-016: Sanitize objects to prevent Prototype Pollution
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn('[AutomationEngine Security] Blocked prototype pollution attempt:', key);
+          continue;
+        }
+
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeObject(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  /**
+   * SECURITY FIX P0-017: Validate webhook URL to prevent SSRF attacks
+   */
+  function validateWebhookUrl(url) {
+    if (!url || typeof url !== 'string') {
+      throw new Error('Invalid webhook URL: must be a string');
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch (e) {
+      throw new Error(`Invalid webhook URL format: ${e.message}`);
+    }
+
+    // Only allow HTTP/HTTPS protocols
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Invalid webhook protocol: ${parsed.protocol}. Only HTTP/HTTPS allowed.`);
+    }
+
+    // Block localhost and loopback IPs
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '0.0.0.0') {
+      throw new Error('Webhook URL cannot target localhost');
+    }
+
+    // Block private IP ranges (IPv4)
+    const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+    const ipMatch = hostname.match(ipv4Regex);
+    if (ipMatch) {
+      const octets = ipMatch.slice(1, 5).map(Number);
+
+      // 10.0.0.0/8
+      if (octets[0] === 10) {
+        throw new Error('Webhook URL cannot target private IP range (10.x.x.x)');
+      }
+
+      // 172.16.0.0/12
+      if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) {
+        throw new Error('Webhook URL cannot target private IP range (172.16-31.x.x)');
+      }
+
+      // 192.168.0.0/16
+      if (octets[0] === 192 && octets[1] === 168) {
+        throw new Error('Webhook URL cannot target private IP range (192.168.x.x)');
+      }
+
+      // 169.254.0.0/16 (Link-local / Cloud metadata)
+      if (octets[0] === 169 && octets[1] === 254) {
+        throw new Error('Webhook URL cannot target link-local IP (cloud metadata endpoint)');
+      }
+    }
+
+    return url;
+  }
+
+  /**
+   * SECURITY FIX P0-018: Sanitize HTTP headers to prevent Header Injection
+   */
+  function sanitizeHeaders(headers) {
+    if (!headers || typeof headers !== 'object') {
+      return {};
+    }
+
+    const sanitized = {};
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+
+    for (const key in headers) {
+      if (Object.prototype.hasOwnProperty.call(headers, key)) {
+        // Skip dangerous prototype keys
+        if (dangerousKeys.includes(key)) {
+          console.warn('[AutomationEngine Security] Blocked dangerous header key:', key);
+          continue;
+        }
+
+        // Validate header name (no newlines, no control chars)
+        const headerName = String(key);
+        if (/[\r\n\x00-\x1F]/.test(headerName)) {
+          console.warn('[AutomationEngine Security] Blocked header with invalid characters:', key);
+          continue;
+        }
+
+        // Sanitize header value (no newlines)
+        const headerValue = String(headers[key]);
+        if (/[\r\n]/.test(headerValue)) {
+          console.warn('[AutomationEngine Security] Blocked header value with newlines:', key);
+          continue;
+        }
+
+        sanitized[headerName] = headerValue;
+      }
+    }
+
+    return sanitized;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
   // PERSISTÊNCIA
   // ═══════════════════════════════════════════════════════════════════
   async function loadState() {
     try {
       const stored = await chrome.storage.local.get(STORAGE_KEY);
       if (stored[STORAGE_KEY]) {
-        const data = stored[STORAGE_KEY];
+        // SECURITY FIX P0-019/P0-020: Sanitize all data from storage
+        const data = sanitizeObject(stored[STORAGE_KEY]);
+
         state.rules = data.rules || [];
         state.stats = { ...state.stats, ...data.stats };
         state.settings = { ...state.settings, ...data.settings };
@@ -436,23 +567,39 @@
 
   async function executeTriggerWebhook(params, context) {
     const { url, method = 'POST', headers = {} } = params;
-    
+
     try {
-      const response = await fetch(url, {
-        method,
+      // SECURITY FIX P0-017: Validate webhook URL to prevent SSRF
+      const validatedUrl = validateWebhookUrl(url);
+
+      // SECURITY FIX P0-018: Sanitize headers to prevent Header Injection
+      const sanitizedHeaders = sanitizeHeaders(headers);
+
+      // Add timeout to prevent hanging
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      const response = await fetch(validatedUrl, {
+        method: ['GET', 'POST', 'PUT', 'DELETE'].includes(method) ? method : 'POST', // Whitelist methods
         headers: {
           'Content-Type': 'application/json',
-          ...headers
+          ...sanitizedHeaders
         },
         body: JSON.stringify({
           event: context.event,
           data: context,
           timestamp: new Date().toISOString()
-        })
+        }),
+        signal: controller.signal
       });
-      
+
+      clearTimeout(timeoutId);
       return { success: response.ok, status: response.status };
+
     } catch (error) {
+      if (error.name === 'AbortError') {
+        return { success: false, error: 'Webhook request timeout (10s)' };
+      }
       return { success: false, error: error.message };
     }
   }

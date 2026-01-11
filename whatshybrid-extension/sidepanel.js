@@ -1768,10 +1768,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     const hourlyProgress = (stats.responsesThisHour / (config.MAX_RESPONSES_PER_HOUR || 30)) * 100;
                     if (progressEl) progressEl.style.width = `${Math.min(hourlyProgress, 100)}%`;
                     
-                    const pending = stats.pendingChats || 0;
+                    // PARTIAL-001 FIX: XSS P0 - Validar e sanitizar pending antes de innerHTML
+                    const pending = parseInt(stats.pendingChats, 10) || 0;
                     if (infoEl) {
                         if (pending > 0) {
-                            infoEl.innerHTML = `🔄 Processando... <strong>${pending}</strong> chat(s) na fila.`;
+                            // Usar textContent para o número evita XSS se stats for comprometido
+                            infoEl.innerHTML = '🔄 Processando... <strong></strong> chat(s) na fila.';
+                            infoEl.querySelector('strong').textContent = String(pending);
                         } else {
                             infoEl.innerHTML = '✅ Aguardando novas mensagens...';
                         }
@@ -2432,9 +2435,23 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateNotifyList() {
       if (!notifyList) return;
       const contacts = window.RecoverAdvanced?.getContactNotifications?.() || [];
-      notifyList.innerHTML = contacts.filter(c => c !== 'all').map(c => 
-        `<span style="background:rgba(16,185,129,0.2);padding:2px 6px;border-radius:4px;margin-right:4px">${c}</span>`
-      ).join('') || '<span style="color:#6b7280">Nenhum contato específico</span>';
+      // PARTIAL-001 FIX: XSS P0 - Usar textContent ao invés de innerHTML para dados não confiáveis
+      notifyList.innerHTML = ''; // Limpar primeiro
+      const filteredContacts = contacts.filter(c => c !== 'all');
+
+      if (filteredContacts.length === 0) {
+        const emptySpan = document.createElement('span');
+        emptySpan.style.color = '#6b7280';
+        emptySpan.textContent = 'Nenhum contato específico';
+        notifyList.appendChild(emptySpan);
+      } else {
+        filteredContacts.forEach(c => {
+          const span = document.createElement('span');
+          span.style.cssText = 'background:rgba(16,185,129,0.2);padding:2px 6px;border-radius:4px;margin-right:4px';
+          span.textContent = String(c); // Usar textContent evita XSS
+          notifyList.appendChild(span);
+        });
+      }
     }
     updateNotifyList();
     

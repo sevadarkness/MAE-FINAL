@@ -22,6 +22,42 @@
   };
 
   // ============================================================
+  // 🛡️ SECURITY HELPERS - Prototype Pollution Protection
+  // ============================================================
+
+  /**
+   * Remove dangerous keys that can cause prototype pollution
+   * @param {object} obj - Object to sanitize
+   * @returns {object} - Clean object
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const clean = Object.create(null);
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn(`[Security] Blocked prototype pollution attempt: ${key}`);
+          continue;
+        }
+
+        // Recursively sanitize nested objects
+        if (obj[key] && typeof obj[key] === 'object') {
+          clean[key] = sanitizeObject(obj[key]);
+        } else {
+          clean[key] = obj[key];
+        }
+      }
+    }
+
+    return clean;
+  }
+
+  // ============================================================
   // 🔍 ADVANCED CONTEXT ANALYZER
   // Analisa perfil do cliente e detecta fluxo de conversa
   // ============================================================
@@ -1079,7 +1115,9 @@
         const data = await chrome.storage.local.get(STORAGE_KEYS.METRICS);
         if (data[STORAGE_KEYS.METRICS]) {
           const parsed = JSON.parse(data[STORAGE_KEYS.METRICS]);
-          this.metrics = { ...this.metrics, ...parsed.metrics };
+          // SECURITY FIX (PARTIAL-005): Prevent prototype pollution via spread operator
+          const sanitizedMetrics = sanitizeObject(parsed.metrics || {});
+          this.metrics = { ...this.metrics, ...sanitizedMetrics };
           this.history = parsed.history || [];
         }
       } catch (error) {

@@ -37,6 +37,37 @@
     }
 
     /**
+     * SECURITY FIX P0-003: Sanitize objects to prevent Prototype Pollution
+     * Filters out dangerous keys (__proto__, constructor, prototype)
+     */
+    _sanitizeObject(obj) {
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+        return obj;
+      }
+
+      const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+      const sanitized = {};
+
+      for (const key in obj) {
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+          if (dangerousKeys.includes(key)) {
+            console.warn('[ContactManager Security] Blocked prototype pollution attempt:', key);
+            continue;
+          }
+
+          // Recursively sanitize nested objects
+          if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+            sanitized[key] = this._sanitizeObject(obj[key]);
+          } else {
+            sanitized[key] = obj[key];
+          }
+        }
+      }
+
+      return sanitized;
+    }
+
+    /**
      * Inicializa o ContactManager
      */
     async initialize() {
@@ -143,8 +174,10 @@
       for (const contact of data) {
         const phone = this.normalizePhone(contact.phone || contact.telefone);
         if (phone) {
+          // SECURITY FIX P0-003: Sanitize contact before spread to prevent prototype pollution
+          const sanitizedContact = this._sanitizeObject(contact);
           this.contacts.set(phone, {
-            ...contact,
+            ...sanitizedContact,
             phone,
             updatedAt: Date.now()
           });
@@ -235,7 +268,9 @@
         contact.tags.forEach(tag => this.removeFromTagIndex(tag, phone));
       }
 
-      Object.assign(contact, updates, { updatedAt: Date.now() });
+      // SECURITY FIX P0-003: Sanitize updates to prevent prototype pollution via Object.assign
+      const sanitizedUpdates = this._sanitizeObject(updates);
+      Object.assign(contact, sanitizedUpdates, { updatedAt: Date.now() });
       
       // Adicionar novas tags ao índice
       if (contact.tags) {

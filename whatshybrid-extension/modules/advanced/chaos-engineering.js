@@ -143,59 +143,112 @@
     }
 
     _applyLatencyChaos(experiment, execution) {
-      // Interceptar fetch
-      const originalFetch = window.fetch;
-      this.originalFunctions.set('fetch', originalFetch);
-
-      window.fetch = async (...args) => {
-        if (Math.random() < experiment.intensity) {
-          const delay = Math.floor(Math.random() * 3000 + 1000);
-          execution.events.push({
-            type: 'latency_injected',
-            delay,
-            timestamp: Date.now()
-          });
-          await new Promise(r => setTimeout(r, delay));
+      // SECURITY FIX (PARTIAL-003): Proteção contra falha na restauração
+      try {
+        // Previne múltiplos overrides simultâneos
+        if (this.originalFunctions.has('fetch')) {
+          console.warn('[ChaosEngineering] fetch já sobrescrito, pulando');
+          return;
         }
-        return originalFetch.apply(window, args);
-      };
+
+        const originalFetch = window.fetch;
+        this.originalFunctions.set('fetch', originalFetch);
+
+        window.fetch = async (...args) => {
+          try {
+            if (Math.random() < experiment.intensity) {
+              const delay = Math.min(Math.floor(Math.random() * 3000 + 1000), 5000);
+              execution.events.push({
+                type: 'latency_injected',
+                delay,
+                timestamp: Date.now()
+              });
+              await new Promise(r => setTimeout(r, delay));
+            }
+            return originalFetch.apply(window, args);
+          } catch (err) {
+            // Mesmo em erro, chama fetch original
+            return originalFetch.apply(window, args);
+          }
+        };
+      } catch (error) {
+        console.error('[ChaosEngineering] Erro ao aplicar latency chaos:', error);
+        this._restoreOriginalFunctions();
+      }
     }
 
     _applyErrorRateChaos(experiment, execution) {
-      // Interceptar fetch para simular erros
-      const originalFetch = window.fetch;
-      this.originalFunctions.set('fetch', originalFetch);
-
-      window.fetch = async (...args) => {
-        if (Math.random() < experiment.intensity * 0.3) {
-          execution.events.push({
-            type: 'error_injected',
-            timestamp: Date.now()
-          });
-          throw new Error('[ChaosEngineering] Simulated network error');
+      // SECURITY FIX (PARTIAL-003): Proteção contra falha na restauração
+      try {
+        // Previne múltiplos overrides simultâneos
+        if (this.originalFunctions.has('fetch')) {
+          console.warn('[ChaosEngineering] fetch já sobrescrito, pulando');
+          return;
         }
-        return originalFetch.apply(window, args);
-      };
+
+        const originalFetch = window.fetch;
+        this.originalFunctions.set('fetch', originalFetch);
+
+        window.fetch = async (...args) => {
+          try {
+            if (Math.random() < experiment.intensity * 0.3) {
+              execution.events.push({
+                type: 'error_injected',
+                timestamp: Date.now()
+              });
+              throw new Error('[ChaosEngineering] Simulated network error');
+            }
+            return originalFetch.apply(window, args);
+          } catch (err) {
+            // Se foi erro injetado proposital, relança
+            if (err.message.includes('[ChaosEngineering]')) {
+              throw err;
+            }
+            // Outros erros: chama fetch original
+            return originalFetch.apply(window, args);
+          }
+        };
+      } catch (error) {
+        console.error('[ChaosEngineering] Erro ao aplicar error chaos:', error);
+        this._restoreOriginalFunctions();
+      }
     }
 
     _applyTimeoutChaos(experiment, execution) {
-      // Interceptar fetch com timeout agressivo
-      const originalFetch = window.fetch;
-      this.originalFunctions.set('fetch', originalFetch);
-
-      window.fetch = async (...args) => {
-        if (Math.random() < experiment.intensity * 0.2) {
-          execution.events.push({
-            type: 'timeout_injected',
-            timestamp: Date.now()
-          });
-          // Simular timeout cancelando a requisição
-          const controller = new AbortController();
-          setTimeout(() => controller.abort(), 100);
-          return originalFetch(args[0], { ...args[1], signal: controller.signal });
+      // SECURITY FIX (PARTIAL-003): Proteção contra falha na restauração
+      try {
+        // Previne múltiplos overrides simultâneos
+        if (this.originalFunctions.has('fetch')) {
+          console.warn('[ChaosEngineering] fetch já sobrescrito, pulando');
+          return;
         }
-        return originalFetch.apply(window, args);
-      };
+
+        const originalFetch = window.fetch;
+        this.originalFunctions.set('fetch', originalFetch);
+
+        window.fetch = async (...args) => {
+          try {
+            if (Math.random() < experiment.intensity * 0.2) {
+              execution.events.push({
+                type: 'timeout_injected',
+                timestamp: Date.now()
+              });
+              // Simular timeout cancelando a requisição
+              const controller = new AbortController();
+              setTimeout(() => controller.abort(), 100);
+              const options = args[1] || {};
+              return originalFetch(args[0], { ...options, signal: controller.signal });
+            }
+            return originalFetch.apply(window, args);
+          } catch (err) {
+            // Em caso de erro (incluindo timeout), relança
+            throw err;
+          }
+        };
+      } catch (error) {
+        console.error('[ChaosEngineering] Erro ao aplicar timeout chaos:', error);
+        this._restoreOriginalFunctions();
+      }
     }
 
     _collectMetrics() {
@@ -215,33 +268,50 @@
 
       const { execution, timeoutId, experiment } = active;
 
-      // Limpar timeout
-      clearTimeout(timeoutId);
+      try {
+        // Limpar timeout
+        clearTimeout(timeoutId);
 
-      // Restaurar funções originais
-      this._restoreOriginalFunctions();
+        // SECURITY FIX (PARTIAL-003): Garantir restauração mesmo em erro
+        this._restoreOriginalFunctions();
 
-      // Coletar métricas finais
-      execution.metrics.after = this._collectMetrics();
-      execution.endedAt = Date.now();
-      execution.duration = execution.endedAt - execution.startedAt;
+        // Coletar métricas finais
+        execution.metrics.after = this._collectMetrics();
+        execution.endedAt = Date.now();
+        execution.duration = execution.endedAt - execution.startedAt;
 
-      // Analisar resultado
-      const result = this._analyzeResult(experiment, execution);
-      this.results.push(result);
-      
-      this.activeExperiments.delete(experimentId);
-      this._saveData();
+        // Analisar resultado
+        const result = this._analyzeResult(experiment, execution);
+        this.results.push(result);
 
-      console.log(`[ChaosEngineering] Stopped: ${experiment.name}`);
-      return result;
+        this.activeExperiments.delete(experimentId);
+        this._saveData();
+
+        console.log(`[ChaosEngineering] Stopped: ${experiment.name}`);
+        return result;
+      } catch (error) {
+        console.error('[ChaosEngineering] Erro ao parar experimento:', error);
+        // Garantir restauração e limpeza mesmo em erro
+        this._restoreOriginalFunctions();
+        this.activeExperiments.delete(experimentId);
+        throw error;
+      }
     }
 
     _restoreOriginalFunctions() {
-      for (const [name, fn] of this.originalFunctions) {
-        if (name === 'fetch') window.fetch = fn;
+      // SECURITY FIX (PARTIAL-003): Restauração robusta com try-catch
+      try {
+        for (const [name, fn] of this.originalFunctions) {
+          if (name === 'fetch' && typeof fn === 'function') {
+            window.fetch = fn;
+          }
+        }
+        this.originalFunctions.clear();
+      } catch (error) {
+        console.error('[ChaosEngineering] Erro ao restaurar funções:', error);
+        // Tentar limpar mesmo em erro
+        this.originalFunctions.clear();
       }
-      this.originalFunctions.clear();
     }
 
     _analyzeResult(experiment, execution) {
@@ -315,7 +385,18 @@
     }
 
     destroy() {
-      this.stopAll();
+      // SECURITY FIX (PARTIAL-003): Cleanup completo e seguro
+      try {
+        this.stopAll();
+        this._restoreOriginalFunctions();
+        this.activeExperiments.clear();
+        console.log('[ChaosEngineering] Destroyed successfully');
+      } catch (error) {
+        console.error('[ChaosEngineering] Erro ao destruir:', error);
+        // Forçar limpeza mesmo em erro
+        this._restoreOriginalFunctions();
+        this.activeExperiments.clear();
+      }
     }
   }
 

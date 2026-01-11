@@ -77,21 +77,55 @@
   };
 
   // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-012: Sanitize objects to prevent Prototype Pollution
+   * Recursively removes dangerous keys from untrusted objects
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn('[TTS Security] Blocked prototype pollution attempt:', key);
+          continue;
+        }
+
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeObject(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  // ============================================
   // INICIALIZAÇÃO
   // ============================================
-  
+
   async function init() {
     console.log('[TTS] Inicializando...');
-    
+
     // Carregar configurações salvas
     await loadSettings();
-    
+
     // Carregar vozes disponíveis
     await loadVoices();
-    
+
     // Selecionar melhor voz disponível
     selectBestVoice();
-    
+
     console.log('[TTS] ✅ Inicializado -', state.availableVoices.length, 'vozes disponíveis');
   }
 
@@ -100,14 +134,25 @@
       try {
         chrome.storage.local.get([CONFIG.storageKey], (result) => {
           if (result[CONFIG.storageKey]) {
-            const saved = result[CONFIG.storageKey];
+            // SECURITY FIX P0-012: Sanitize all data from storage to prevent Prototype Pollution
+            const saved = sanitizeObject(result[CONFIG.storageKey]);
+
             state.speed = saved.speed ?? CONFIG.defaultSpeed;
             state.pitch = saved.pitch ?? CONFIG.defaultPitch;
             state.volume = saved.volume ?? CONFIG.defaultVolume;
             state.provider = saved.provider ?? CONFIG.defaultProvider;
+
+            // SECURITY NOTE P0-013: API keys stored in chrome.storage.local are NOT encrypted
+            // RECOMMENDATION: Use chrome.storage.session (encrypted) or environment variables for production
+            // Current implementation stores keys in plaintext - acceptable only for development/testing
             state.azureConfig = saved.azureConfig || null;
             state.googleConfig = saved.googleConfig || null;
+
             state.stats = saved.stats || state.stats;
+
+            if (saved.azureConfig || saved.googleConfig) {
+              console.warn('[TTS Security] API keys loaded from storage. Ensure proper access controls are in place.');
+            }
           }
           resolve();
         });
@@ -384,12 +429,15 @@
     const voice = options.googleVoice || 'pt-BR-Standard-A';
     const speed = options.speed ?? state.speed;
 
+    // SECURITY FIX P0-014: Move API key from URL to header
+    // URL query parameters are logged, cached, and visible in browser history
     const response = await fetch(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`,
+      'https://texttospeech.googleapis.com/v1/text:synthesize',
       {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey  // Use header instead of query parameter
         },
         body: JSON.stringify({
           input: { text },
@@ -594,18 +642,48 @@
   /**
    * Configura Azure Cognitive Services
    * @param {Object} config - { key, region }
+   *
+   * SECURITY WARNING P0-013: API keys are stored in plaintext in chrome.storage.local
+   * For production use:
+   * - Use environment variables or secure key management service
+   * - Use chrome.storage.session (encrypted by browser) instead of local
+   * - Implement proper access controls and key rotation
    */
   function configureAzure(config) {
-    state.azureConfig = config;
+    // SECURITY FIX P0-015: Sanitize config object before storing
+    const sanitized = sanitizeObject(config);
+
+    // Validate config structure
+    if (!sanitized || typeof sanitized.key !== 'string' || typeof sanitized.region !== 'string') {
+      throw new Error('Invalid Azure config: must have { key: string, region: string }');
+    }
+
+    state.azureConfig = sanitized;
+    console.warn('[TTS Security] Azure API key configured. Stored in plaintext - use secure storage for production.');
     saveSettings();
   }
 
   /**
    * Configura Google Cloud TTS
    * @param {Object} config - { apiKey }
+   *
+   * SECURITY WARNING P0-013: API keys are stored in plaintext in chrome.storage.local
+   * For production use:
+   * - Use environment variables or secure key management service
+   * - Use chrome.storage.session (encrypted by browser) instead of local
+   * - Implement proper access controls and key rotation
    */
   function configureGoogle(config) {
-    state.googleConfig = config;
+    // SECURITY FIX P0-015: Sanitize config object before storing
+    const sanitized = sanitizeObject(config);
+
+    // Validate config structure
+    if (!sanitized || typeof sanitized.apiKey !== 'string') {
+      throw new Error('Invalid Google config: must have { apiKey: string }');
+    }
+
+    state.googleConfig = sanitized;
+    console.warn('[TTS Security] Google API key configured. Stored in plaintext - use secure storage for production.');
     saveSettings();
   }
 
