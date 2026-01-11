@@ -688,6 +688,39 @@
   }
 
   // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-026: Sanitize objects to prevent Prototype Pollution
+   */
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+      return obj;
+    }
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (dangerousKeys.includes(key)) {
+          console.warn('[SelectorEngine Security] Blocked prototype pollution attempt:', key);
+          continue;
+        }
+
+        if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+          sanitized[key] = sanitizeObject(obj[key]);
+        } else {
+          sanitized[key] = obj[key];
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  // ============================================
   // CONFIGURAÇÃO
   // ============================================
 
@@ -696,8 +729,11 @@
    * @param {Object} newConfig - Novas configurações
    */
   function setConfig(newConfig) {
-    Object.assign(CONFIG, newConfig);
-    if (newConfig.cacheDuration !== undefined) {
+    // SECURITY FIX P0-026: Sanitize config to prevent Prototype Pollution
+    const sanitized = sanitizeObject(newConfig);
+    Object.assign(CONFIG, sanitized);
+
+    if (sanitized.cacheDuration !== undefined) {
       clearCache(); // Limpar cache se duração mudou
     }
   }
