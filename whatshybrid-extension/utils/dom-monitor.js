@@ -231,6 +231,12 @@ class WhatsAppDOMMonitor {
    */
   async sendTelemetry(results) {
     try {
+      // FIX PEND-MED-010: Check user consent before sending telemetry
+      const consentData = await chrome.storage.local.get('whl_telemetry_consent');
+      if (consentData.whl_telemetry_consent !== true) {
+        return; // User has not consented
+      }
+
       const config = await chrome.storage.local.get(['whl_backend_url', 'whl_auth_token']);
 
       if (!config.whl_backend_url || !config.whl_auth_token) {

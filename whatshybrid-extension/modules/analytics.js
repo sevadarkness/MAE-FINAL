@@ -391,16 +391,52 @@
   }
 
   /**
+   * FIX PEND-MED-010: Check user consent before sending telemetry
+   */
+  async function hasUserConsent() {
+    try {
+      const result = await chrome.storage.local.get('whl_telemetry_consent');
+      return result.whl_telemetry_consent === true;
+    } catch (e) {
+      return false; // Default to no consent if error
+    }
+  }
+
+  /**
+   * Sanitize PII from telemetry data
+   */
+  function sanitizeTelemetryData(data) {
+    // Hash phone numbers instead of sending plain text
+    const sanitized = { ...data };
+
+    if (sanitized.contacts && Array.isArray(sanitized.contacts)) {
+      sanitized.contacts = sanitized.contacts.map(phone => {
+        // Simple hash to anonymize (in production, use proper crypto)
+        return phone ? `hashed_${phone.length}_${phone.charCodeAt(0)}` : null;
+      });
+    }
+
+    return sanitized;
+  }
+
+  /**
    * PEND-MED-010: Sincronizar telemetria com backend
    */
   async function syncTelemetry() {
     try {
+      // FIX PEND-MED-010: Check user consent before sending
+      const hasConsent = await hasUserConsent();
+      if (!hasConsent) {
+        console.log('[Analytics] ⚠️ Telemetry disabled - user has not consented');
+        return { success: false, reason: 'no_user_consent' };
+      }
+
       if (!window.BackendClient?.isConnected?.()) {
         console.log('[Analytics] Backend não conectado, pulando sync telemetria');
         return { success: false, reason: 'backend_not_connected' };
       }
 
-      const payload = {
+      const rawPayload = {
         sessionId: state.sessionId,
         totalMessages: state.data.totalMessages,
         daily: state.data.daily,
@@ -409,6 +445,9 @@
         campaigns: state.data.campaigns,
         responseTimes: state.data.responseTimes
       };
+
+      // FIX PEND-MED-010: Sanitize PII before sending
+      const payload = sanitizeTelemetryData(rawPayload);
 
       const response = await window.BackendClient.post('/api/v1/analytics/telemetry', payload);
 
@@ -928,7 +967,13 @@
     exportData,
     exportToCSV,
     exportToPDF,
-    syncTelemetry
+    syncTelemetry,
+    // FIX PEND-MED-010: Telemetry consent controls
+    setTelemetryConsent: async (enabled) => {
+      await chrome.storage.local.set({ whl_telemetry_consent: enabled === true });
+      console.log('[Analytics] Telemetry consent:', enabled ? 'GRANTED' : 'DENIED');
+    },
+    getTelemetryConsent: hasUserConsent
   };
 
 })();

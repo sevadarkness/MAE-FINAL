@@ -169,5 +169,15 @@
     "sent": "¡Enviado con éxito!",
     "confirmDelete": "¿Estás seguro de que deseas eliminar?",
     "unsavedChanges": "Tienes cambios sin guardar. ¿Deseas salir de todos modos?"
+  },
+
+  "notifications": {
+    "error": "Error",
+    "warning": "Atención",
+    "info": "Información",
+    "success": "Éxito",
+    "confirm": "Confirmar",
+    "alert": "Aviso",
+    "input": "Entrada"
   }
 }
