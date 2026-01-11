@@ -381,7 +381,10 @@
   /**
    * Loading notification
    */
-  function loading(message = 'Carregando...') {
+  function loading(message) {
+    // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+    const defaultMessage = (typeof window.t === 'function') ? window.t('common.loading') : 'Carregando...';
+    message = message || defaultMessage;
     return show({
       message: `<span style="display:inline-flex;align-items:center;gap:8px;"><span class="whl-spinner"></span>${message}</span>`,
       type: 'info',

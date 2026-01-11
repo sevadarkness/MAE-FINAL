@@ -330,7 +330,10 @@
       });
     },
 
-    prompt(message, defaultValue = '', title = 'Entrada') {
+    prompt(message, defaultValue = '', title) {
+      // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+      const defaultTitle = (typeof window.t === 'function') ? window.t('notifications.input') : 'Entrada';
+      title = title || defaultTitle;
       return new Promise((resolve) => {
         const modal = this.show({
           title,
@@ -383,9 +386,13 @@
   const LoadingManager = {
     overlay: null,
 
-    show(message = 'Carregando...') {
+    show(message) {
+      // PEND-LOW-001 FIX: Usar i18n ao invés de hardcoded
+      const defaultMessage = (typeof window.t === 'function') ? window.t('common.loading') : 'Carregando...';
+      message = message || defaultMessage;
+
       this.hide();
-      
+
       this.overlay = document.createElement('div');
       this.overlay.className = 'whl-loading-overlay';
       this.overlay.style.cssText = `
