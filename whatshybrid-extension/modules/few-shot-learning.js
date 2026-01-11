@@ -18,6 +18,77 @@
   const MAX_EXAMPLES = 60;
   const WHL_DEBUG = (typeof localStorage !== 'undefined' && localStorage.getItem('whl_debug') === 'true');
 
+  // ============================================
+  // SECURITY HELPERS
+  // ============================================
+
+  /**
+   * SECURITY FIX P0-031: Sanitize training examples to prevent Prompt Injection and Training Data Poisoning
+   * Critical: Examples are directly embedded in AI prompts - malicious examples = compromised AI responses
+   */
+  function sanitizeTrainingExample(example) {
+    if (!example || typeof example !== 'object') {
+      return null;
+    }
+
+    // Helper: Sanitize text to prevent prompt injection
+    const sanitizeText = (text, maxLength = 2000) => {
+      if (!text) return '';
+
+      let sanitized = String(text).slice(0, maxLength);
+
+      // Remove control characters that could break prompt formatting
+      sanitized = sanitized.replace(/[\x00-\x1F\x7F]/g, '');
+
+      // Detect and neutralize prompt injection attempts
+      const injectionPatterns = [
+        /ignore\s+(all\s+)?previous\s+instructions/gi,
+        /disregard\s+(all\s+)?above/gi,
+        /forget\s+(all\s+)?previous/gi,
+        /new\s+instructions?:/gi,
+        /system\s*:/gi,
+        /assistant\s*:/gi,
+        /you\s+are\s+now/gi,
+        /<\|.*?\|>/g, // Special tokens
+        /\[INST\]/gi,
+        /\[\/INST\]/gi
+      ];
+
+      injectionPatterns.forEach(pattern => {
+        if (pattern.test(sanitized)) {
+          console.warn('[FewShotLearning Security] Prompt injection attempt detected and neutralized');
+          sanitized = sanitized.replace(pattern, '[FILTERED]');
+        }
+      });
+
+      return sanitized.trim();
+    };
+
+    // Validate and sanitize all fields
+    const sanitized = {
+      id: Number(example.id) || Date.now(),
+      input: sanitizeText(example.input, 2000),
+      output: sanitizeText(example.output, 3000),
+      context: sanitizeText(example.context || '', 500),
+      category: sanitizeText(example.category || 'Geral', 50),
+      tags: Array.isArray(example.tags)
+        ? example.tags.slice(0, 20).map(t => sanitizeText(String(t), 30))
+        : [],
+      createdAt: Number(example.createdAt) || Date.now(),
+      usageCount: Number(example.usageCount) || 0,
+      lastUsed: example.lastUsed ? Number(example.lastUsed) : null,
+      score: Number(example.score) || 1.0
+    };
+
+    // Reject examples with empty input/output (after sanitization)
+    if (!sanitized.input || !sanitized.output) {
+      console.warn('[FewShotLearning Security] Rejecting example with empty input/output after sanitization');
+      return null;
+    }
+
+    return sanitized;
+  }
+
   class FewShotLearning {
     constructor() {
       this.examples = [];
@@ -33,8 +104,20 @@
       try {
         const data = await chrome.storage.local.get(STORAGE_KEY);
         if (data[STORAGE_KEY]) {
-          this.examples = JSON.parse(data[STORAGE_KEY]);
-          if (WHL_DEBUG) console.log('[FewShotLearning] Exemplos carregados:', this.examples.length);
+          const rawExamples = JSON.parse(data[STORAGE_KEY]);
+
+          // SECURITY FIX P0-031: Sanitize examples loaded from storage to prevent Training Data Poisoning
+          // Storage could be compromised or contain legacy unsanitized data
+          this.examples = rawExamples
+            .map(ex => sanitizeTrainingExample(ex))
+            .filter(ex => ex !== null);
+
+          const rejectedCount = rawExamples.length - this.examples.length;
+          if (rejectedCount > 0) {
+            console.warn(`[FewShotLearning Security] ${rejectedCount} examples rejected during load`);
+          }
+
+          if (WHL_DEBUG) console.log('[FewShotLearning] Exemplos carregados (sanitizados):', this.examples.length);
         }
         this.initialized = true;
       } catch (error) {
@@ -70,7 +153,8 @@
         return null;
       }
 
-      const newExample = {
+      // SECURITY FIX P0-031: Sanitize example to prevent Prompt Injection and Training Data Poisoning
+      const sanitized = sanitizeTrainingExample({
         id: Date.now(),
         input: example.input,
         output: example.output,
@@ -81,9 +165,14 @@
         usageCount: 0,
         lastUsed: null,
         score: 1.0
-      };
+      });
 
-      this.examples.push(newExample);
+      if (!sanitized) {
+        console.warn('[FewShotLearning Security] Example rejected after sanitization');
+        return null;
+      }
+
+      this.examples.push(sanitized);
 
       // Limita número de exemplos (remove menos utilizados)
       if (this.examples.length > MAX_EXAMPLES) {
@@ -500,13 +589,20 @@
       const existingIds = new Set(this.examples.map(ex => ex.id));
 
       externalExamples.forEach(external => {
-        if (!existingIds.has(external.id)) {
-          this.examples.push(external);
+        // SECURITY FIX P0-031: Sanitize external examples to prevent Training Data Poisoning
+        const sanitized = sanitizeTrainingExample(external);
+        if (!sanitized) {
+          console.warn('[FewShotLearning Security] External example rejected after sanitization');
+          return;
+        }
+
+        if (!existingIds.has(sanitized.id)) {
+          this.examples.push(sanitized);
         } else {
           // Atualiza exemplo existente se o externo for mais recente
-          const index = this.examples.findIndex(ex => ex.id === external.id);
-          if (index >= 0 && external.lastUsed > this.examples[index].lastUsed) {
-            this.examples[index] = external;
+          const index = this.examples.findIndex(ex => ex.id === sanitized.id);
+          if (index >= 0 && sanitized.lastUsed > this.examples[index].lastUsed) {
+            this.examples[index] = sanitized;
           }
         }
       });
