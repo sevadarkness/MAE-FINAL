@@ -715,7 +715,9 @@ class PopupController {
                 } catch (e) {
                     console.log(`[SidePanel] ⚠️ Tentativa ${attempt} falhou:`, e.message);
                     if (attempt < this.CONNECTION.MAX_RETRIES) {
-                        await this.delay(this.CONNECTION.RETRY_DELAY_MS);
+                        // FIX PEND-MED-004: Use exponential backoff
+                        const backoffDelay = this.CONNECTION.RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+                        await this.delay(backoffDelay);
                     }
                 }
             }
@@ -1061,7 +1063,9 @@ class PopupController {
                     // Retry avança levemente em vez de regredir (+2% por tentativa)
                     currentProgress = Math.max(currentProgress, this.PROGRESS.STARTING + (attempt - 1) * 2);
                     this.showStatus(`🔄 Retry automático (${attempt}/${MAX_EXTRACTION_RETRIES})...`, currentProgress);
-                    await this.delay(RETRY_DELAY_MS);
+                    // FIX PEND-MED-004: Use exponential backoff (1.5s, 3s, 6s)
+                    const backoffDelay = RETRY_DELAY_MS * Math.pow(2, attempt - 2);
+                    await this.delay(backoffDelay);
                 }
                 
                 // Navegando - progride para ~12%
@@ -1085,9 +1089,13 @@ class PopupController {
                 this.showStatus('📂 Abrindo informações...', currentProgress);
                 
                 // Aguardar mais tempo na primeira tentativa, com tempo extra para arquivados
-                const waitTime = attempt === 1 
-                    ? (this.selectedGroup.isArchived ? INITIAL_WAIT_MS_ARCHIVED : INITIAL_WAIT_MS_ACTIVE)
-                    : RETRY_WAIT_MS;
+                let waitTime;
+                if (attempt === 1) {
+                    waitTime = this.selectedGroup.isArchived ? INITIAL_WAIT_MS_ARCHIVED : INITIAL_WAIT_MS_ACTIVE;
+                } else {
+                    // FIX PEND-MED-004: Use exponential backoff for retries (1s, 2s, 4s)
+                    waitTime = RETRY_WAIT_MS * Math.pow(2, attempt - 2);
+                }
                 await this.delay(waitTime);
                 
                 // Aguardando modal - progride para ~30%

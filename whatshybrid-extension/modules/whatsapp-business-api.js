@@ -246,7 +246,8 @@
         }
         
         if (attempt < CONFIG.MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * attempt));
+          // FIX PEND-MED-004: Use exponential backoff instead of linear
+          await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAY * Math.pow(2, attempt - 1)));
         }
       }
     }
