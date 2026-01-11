@@ -5,6 +5,7 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate, apiKeyAuth } = require('../middleware/auth');
+const { checkSubscription } = require('../middleware/subscription');
 const { body, validationResult } = require('express-validator');
 const database = require('../utils/database');
 const logger = require('../utils/logger');
@@ -13,10 +14,12 @@ const { v4: uuidv4 } = require('uuid');
 /**
  * POST /api/v1/memory/batch
  * Sincroniza múltiplas memórias
+ * FIX PEND-HIGH-002: Requer plano premium (memória avançada)
  */
 router.post(
   '/batch',
   authenticate,
+  checkSubscription('memory'),
   body('memories').isArray().withMessage('memories deve ser um array'),
   body('memories.*.chatId').notEmpty().withMessage('chatId é obrigatório'),
   async (req, res) => {
@@ -209,8 +212,9 @@ router.get('/', authenticate, async (req, res) => {
 /**
  * DELETE /api/v1/memory/:chatId
  * Deleta memória de um chat
+ * FIX PEND-HIGH-002: Requer plano premium
  */
-router.delete('/:chatId', authenticate, async (req, res) => {
+router.delete('/:chatId', authenticate, checkSubscription('memory'), async (req, res) => {
   try {
     const { chatId } = req.params;
     const workspaceId = req.user.workspace_id || 'default';
@@ -237,8 +241,9 @@ router.delete('/:chatId', authenticate, async (req, res) => {
 /**
  * POST /api/v1/memory/:chatId/facts
  * Adiciona fato a uma memória
+ * FIX PEND-HIGH-002: Requer plano premium
  */
-router.post('/:chatId/facts', authenticate, async (req, res) => {
+router.post('/:chatId/facts', authenticate, checkSubscription('memory'), async (req, res) => {
   try {
     const { chatId } = req.params;
     const { type, value, confidence } = req.body;

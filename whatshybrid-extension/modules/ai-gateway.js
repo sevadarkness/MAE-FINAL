@@ -1217,11 +1217,19 @@
       };
     },
     canUseAI: () => {
-      if (!window.SubscriptionManager) return true;
+      // FIX PEND-HIGH-002: BLOQUEAR uso de AI se SubscriptionManager não está disponível
+      if (!window.SubscriptionManager) {
+        console.error('[AIGateway] SubscriptionManager não disponível - bloqueando uso de AI');
+        return false;
+      }
       return window.SubscriptionManager.canUseAI();
     },
     consumeCredit: async (amount = 1, operation = 'ai_call') => {
-      if (!window.SubscriptionManager) return true;
+      // FIX PEND-HIGH-002: Requer SubscriptionManager para consumir créditos
+      if (!window.SubscriptionManager) {
+        console.error('[AIGateway] SubscriptionManager não disponível - não é possível consumir créditos');
+        return false;
+      }
       try {
         await window.SubscriptionManager.consumeCredits(amount, operation);
         return true;

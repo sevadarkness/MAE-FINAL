@@ -108,11 +108,22 @@
   function performCheck(featureKey) {
     const config = FEATURE_MAP[featureKey];
 
-    // Features desconhecidas são permitidas
-    if (!config) return { allowed: true };
+    // FIX PEND-HIGH-002: Features desconhecidas são BLOQUEADAS por padrão (segurança)
+    if (!config) {
+      console.warn('[FeatureGate] Feature desconhecida:', featureKey);
+      return createResult(false, 'unknown_feature', 'Recurso não configurado no sistema');
+    }
 
-    // Se não existir SubscriptionManager, permitir (modo desenvolvimento)
-    if (!window.SubscriptionManager) return { allowed: true };
+    // FIX PEND-HIGH-002: Se não existir SubscriptionManager, BLOQUEAR recursos premium
+    if (!window.SubscriptionManager) {
+      // Apenas recursos 'free' são permitidos sem SubscriptionManager
+      if (config.minPlan !== 'free') {
+        console.error('[FeatureGate] SubscriptionManager não disponível para recurso premium:', featureKey);
+        return createResult(false, 'subscription_unavailable', 'Sistema de assinaturas não disponível');
+      }
+      // Features free são permitidas
+      return { allowed: true };
+    }
 
     const SM = window.SubscriptionManager;
 
