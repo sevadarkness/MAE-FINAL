@@ -65,7 +65,7 @@
       });
     }
 
-    // Analyze button
+    // Analyze button - D-04: Enhanced with visual feedback states
     const analyzeBtn = document.getElementById('copilot_analyze_btn');
     if (analyzeBtn) {
       analyzeBtn.addEventListener('click', async () => {
@@ -75,9 +75,11 @@
           return;
         }
 
+        // STATE: idle → generating
         analyzeBtn.disabled = true;
-        analyzeBtn.textContent = '⏳ Analisando...';
-        
+        analyzeBtn.innerHTML = '<span class="spinner"></span> Gerando análise...';
+        analyzeBtn.style.opacity = '0.7';
+
         // Armazenar para feedback do aprendizado
         window._lastAnalyzedMessage = input.value;
 
@@ -90,12 +92,37 @@
             const analysis = localAnalysis(input.value);
             displayAnalysisResult(analysis);
           }
-        } catch (error) {
-          showToast('Erro na análise: ' + error.message, 'error');
-        }
 
-        analyzeBtn.disabled = false;
-        analyzeBtn.textContent = '🔍 Analisar Mensagem';
+          // STATE: generating → applied (success)
+          analyzeBtn.innerHTML = '✅ Análise concluída';
+          analyzeBtn.style.background = 'rgba(16,185,129,0.2)';
+          analyzeBtn.style.borderColor = '#10b981';
+          showToast('✅ Análise concluída com sucesso!', 'success');
+
+          // Reset to idle after 2 seconds
+          setTimeout(() => {
+            analyzeBtn.disabled = false;
+            analyzeBtn.innerHTML = '🔍 Analisar Mensagem';
+            analyzeBtn.style.opacity = '1';
+            analyzeBtn.style.background = '';
+            analyzeBtn.style.borderColor = '';
+          }, 2000);
+        } catch (error) {
+          // STATE: generating → error
+          analyzeBtn.innerHTML = '❌ Erro na análise';
+          analyzeBtn.style.background = 'rgba(239,68,68,0.2)';
+          analyzeBtn.style.borderColor = '#ef4444';
+          showToast('Erro na análise: ' + error.message, 'error');
+
+          // Reset to idle after 2 seconds
+          setTimeout(() => {
+            analyzeBtn.disabled = false;
+            analyzeBtn.innerHTML = '🔍 Analisar Mensagem';
+            analyzeBtn.style.opacity = '1';
+            analyzeBtn.style.background = '';
+            analyzeBtn.style.borderColor = '';
+          }, 2000);
+        }
       });
     }
 
@@ -844,7 +871,7 @@
     return labels[mode] || mode;
   }
   
-  // Função global para usar sugestão
+  // Função global para usar sugestão - D-04: Enhanced with "Resposta aplicada" feedback
   window.useSuggestion = function(text) {
     // Registrar uso como feedback positivo implícito (rating 4 = bom)
     const lastInput = window._lastAnalyzedMessage || '';
@@ -856,7 +883,7 @@
         context: { source: 'suggestion_used', implicit: true }
       });
     }
-    
+
     // Enviar mensagem para o content script inserir o texto
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
@@ -865,7 +892,8 @@
           text: text
         }, (response) => {
           if (response?.success) {
-            showToast('✅ Sugestão inserida!', 'success');
+            // D-04: Show "Resposta aplicada" success message
+            showToast('✅ Resposta aplicada com sucesso!', 'success');
           } else {
             showToast('⚠️ Não foi possível inserir. Copie manualmente.', 'warning');
             // Copiar para clipboard como fallback

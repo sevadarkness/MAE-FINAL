@@ -1072,25 +1072,35 @@ Diretrizes:
   }
 
   async function analyzeText(text, instruction, options = {}) {
+    // SECURITY FIX P0-032: Sanitize text to prevent prompt injection
+    const safeText = sanitizeForPrompt(text, 8000);
+    const safeInstruction = sanitizeForPrompt(instruction, 1000);
+
     return complete([
-      { role: 'system', content: instruction },
-      { role: 'user', content: text }
+      { role: 'system', content: safeInstruction },
+      { role: 'user', content: safeText }
     ], options);
   }
 
   async function translateText(text, targetLanguage, options = {}) {
     // SECURITY FIX (PARTIAL-010): Sanitize targetLanguage to prevent prompt injection
     const safeTargetLanguage = sanitizeForPrompt(targetLanguage || 'português', 50);
+    // SECURITY FIX P0-032: Sanitize text to prevent prompt injection
+    const safeText = sanitizeForPrompt(text, 8000);
+
     return complete([
       { role: 'system', content: `Você é um tradutor. Traduza o texto para ${safeTargetLanguage}. Retorne apenas a tradução, sem explicações.` },
-      { role: 'user', content: text }
+      { role: 'user', content: safeText }
     ], options);
   }
 
   async function summarize(text, options = {}) {
+    // SECURITY FIX P0-032: Sanitize text to prevent prompt injection
+    const safeText = sanitizeForPrompt(text, 10000);
+
     return complete([
       { role: 'system', content: 'Resuma o texto de forma concisa, mantendo os pontos principais.' },
-      { role: 'user', content: text }
+      { role: 'user', content: safeText }
     ], { ...options, maxTokens: options.maxTokens || 500 });
   }
 
@@ -1106,9 +1116,12 @@ Diretrizes:
       }
     }
 
+    // SECURITY FIX P0-032: Sanitize text to prevent prompt injection
+    const safeText = sanitizeForPrompt(text, 8000);
+
     const result = await complete([
       { role: 'system', content: `Extraia informações do texto e retorne um JSON válido seguindo este schema: ${JSON.stringify(sanitizedSchema)}. Retorne APENAS o JSON, sem markdown ou explicações.` },
-      { role: 'user', content: text }
+      { role: 'user', content: safeText }
     ], options);
 
     try {
