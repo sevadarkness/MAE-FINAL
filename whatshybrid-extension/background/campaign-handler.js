@@ -244,8 +244,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
       try {
         // Verificar lembretes de tarefas
-        const result = await chrome.storage.local.get('whl_tasks');
-        const tasks = result.whl_tasks || [];
+        // FIX PEND-MED-007: Use correct storage key (whl_tasks_v2, not whl_tasks)
+        const result = await chrome.storage.local.get('whl_tasks_v2');
+        const tasks = result.whl_tasks_v2 || [];
         const now = Date.now();
 
         tasks.forEach(task => {
@@ -275,7 +276,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
         });
 
         // Salvar estado atualizado
-        await chrome.storage.local.set({ whl_tasks: tasks });
+        // FIX PEND-MED-007: Use correct storage key
+        await chrome.storage.local.set({ whl_tasks_v2: tasks });
       } catch (error) {
         console.error('[WHL Background] ❌ Error checking task reminders:', error);
       }

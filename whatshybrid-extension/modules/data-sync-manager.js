@@ -38,8 +38,9 @@
         priority: 'high'
       },
       // FIX PEND-CRIT-003: Corrigido endpoint Tasks sync
+      // FIX PEND-MED-007: Use correct storage key (whl_tasks_v2, not whl_tasks)
       tasks: {
-        localKey: 'whl_tasks',
+        localKey: 'whl_tasks_v2',
         endpoint: '/api/v1/tasks/sync', // FIXED: Era /api/v1/crm/tasks/sync (incorreto)
         priority: 'medium'
       },
