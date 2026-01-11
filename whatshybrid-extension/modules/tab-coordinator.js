@@ -345,6 +345,60 @@
     };
   }
 
+  /**
+   * FIX PEND-MED-008: Helper to add storage listener with leadership check
+   * Only the leader tab will execute the callback, preventing duplicate processing
+   *
+   * @param {Function} callback - The storage change handler
+   * @param {Object} options - Optional configuration
+   * @returns {Function} - The wrapped listener function
+   */
+  function addStorageListener(callback, options = {}) {
+    const {
+      leaderOnly = true,  // Only leader processes by default
+      broadcastToOthers = false  // Optionally broadcast to other tabs
+    } = options;
+
+    const wrappedCallback = (changes, areaName) => {
+      // If leaderOnly is true and this tab is not the leader, ignore
+      if (leaderOnly && !state.isLeader) {
+        return;
+      }
+
+      // Execute the callback
+      callback(changes, areaName);
+
+      // Optionally broadcast the change to other tabs
+      if (broadcastToOthers && state.isLeader) {
+        broadcast({
+          type: 'STORAGE_CHANGED',
+          tabId: state.tabId,
+          changes,
+          areaName,
+          timestamp: Date.now()
+        });
+      }
+    };
+
+    // Register the wrapped listener
+    if (chrome?.storage?.onChanged) {
+      chrome.storage.onChanged.addListener(wrappedCallback);
+    }
+
+    return wrappedCallback;  // Return so caller can remove if needed
+  }
+
+  /**
+   * FIX PEND-MED-008: Execute callback only if this tab is the leader
+   * Useful for wrapping existing storage listener code
+   */
+  function executeIfLeader(callback) {
+    if (state.isLeader) {
+      return callback();
+    }
+    return null;
+  }
+
   // API Pública
   window.TabCoordinator = {
     init,
@@ -353,7 +407,10 @@
     getTabId: () => state.tabId,
     requestAction,
     respondAction,
-    broadcast
+    broadcast,
+    // FIX PEND-MED-008: New helpers for storage listener coordination
+    addStorageListener,
+    executeIfLeader
   };
 
   // Auto-inicializar

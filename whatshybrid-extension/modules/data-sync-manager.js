@@ -200,8 +200,9 @@
   // LISTENER DE MUDANÇAS LOCAIS
   // ============================================
   function setupStorageListener() {
-    // Listener para chrome.storage
-    chrome.storage.onChanged.addListener((changes, areaName) => {
+    // FIX PEND-MED-008: Use TabCoordinator for leader-only storage listening
+    // This prevents duplicate processing when multiple WhatsApp tabs are open
+    const listenerCallback = (changes, areaName) => {
       if (areaName !== 'local') return;
 
       for (const [key, { oldValue, newValue }] of Object.entries(changes)) {
@@ -224,7 +225,21 @@
           scheduleSync(moduleName);
         }
       }
-    });
+    };
+
+    // FIX PEND-MED-008: Register with TabCoordinator if available
+    if (window.TabCoordinator?.addStorageListener) {
+      // Use leader-only pattern to prevent duplicate syncs across tabs
+      window.TabCoordinator.addStorageListener(listenerCallback, {
+        leaderOnly: true,  // Only leader tab syncs to backend
+        broadcastToOthers: false  // Other tabs don't need notification
+      });
+      console.log('[DataSyncManager] ✅ Storage listener registered with TabCoordinator (leader-only)');
+    } else {
+      // Fallback: Direct registration if TabCoordinator not available
+      chrome.storage.onChanged.addListener(listenerCallback);
+      console.warn('[DataSyncManager] ⚠️ TabCoordinator not available, using direct listener (may duplicate across tabs)');
+    }
   }
 
   function scheduleSync(moduleName) {
