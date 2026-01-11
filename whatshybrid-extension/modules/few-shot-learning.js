@@ -22,6 +22,30 @@
   // SECURITY HELPERS
   // ============================================
 
+  // SECURITY FIX P0-041: Prevent Prototype Pollution from JSON import
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        if (Array.isArray(value)) {
+          sanitized[key] = value.map(item =>
+            (item && typeof item === 'object') ? sanitizeObject(item) : item
+          );
+        } else if (value && typeof value === 'object') {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   /**
    * SECURITY FIX P0-031: Sanitize training examples to prevent Prompt Injection and Training Data Poisoning
    * Critical: Examples are directly embedded in AI prompts - malicious examples = compromised AI responses
@@ -633,10 +657,13 @@
      */
     async importJSON(json) {
       try {
-        const imported = JSON.parse(json);
-        
-        if (!Array.isArray(imported)) {
-          throw new Error('JSON inválido: deve ser um array');
+        const parsed = JSON.parse(json);
+
+        // SECURITY FIX P0-041: Sanitize to prevent Prototype Pollution
+        const imported = Array.isArray(parsed) ? parsed.map(item => sanitizeObject(item)) : [];
+
+        if (imported.length === 0 && parsed && parsed.length > 0) {
+          throw new Error('JSON inválido: sanitização removeu todos os elementos');
         }
 
         this.mergeExamples(imported);

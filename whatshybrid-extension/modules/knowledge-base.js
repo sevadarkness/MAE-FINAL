@@ -27,6 +27,32 @@
   const USAGE_STORAGE_KEY = 'whl_knowledge_usage';
   const WHL_DEBUG = (typeof localStorage !== 'undefined' && localStorage.getItem('whl_debug') === 'true');
 
+  // SECURITY FIX P0-037: Prevent Prototype Pollution from storage
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        // Recursively sanitize nested objects and arrays
+        if (Array.isArray(value)) {
+          sanitized[key] = value.map(item =>
+            (item && typeof item === 'object') ? sanitizeObject(item) : item
+          );
+        } else if (value && typeof value === 'object') {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // STOPWORDS para não influenciar no ranking
   // ═══════════════════════════════════════════════════════════════════
@@ -83,7 +109,9 @@
       try {
         const data = await chrome.storage.local.get(STORAGE_KEY);
         if (data[STORAGE_KEY]) {
-          this.knowledge = JSON.parse(data[STORAGE_KEY]);
+          // SECURITY FIX P0-037: Sanitize to prevent Prototype Pollution
+          const parsed = JSON.parse(data[STORAGE_KEY]);
+          this.knowledge = sanitizeObject(parsed);
           console.log('[KnowledgeBase] Conhecimento carregado:', this.knowledge);
         } else {
           console.log('[KnowledgeBase] Usando conhecimento padrão');
@@ -167,7 +195,9 @@
 
         // Carregar histórico existente
         const result = await chrome.storage.local.get([VERSION_HISTORY_KEY]);
-        let history = result[VERSION_HISTORY_KEY] || [];
+        // SECURITY FIX P0-037: Sanitize history array from storage
+        let history = result[VERSION_HISTORY_KEY] ? sanitizeObject(result[VERSION_HISTORY_KEY]) : [];
+        if (!Array.isArray(history)) history = [];
 
         // Adicionar nova versão
         history.push(snapshot);
@@ -195,7 +225,9 @@
     async getVersionHistory() {
       try {
         const result = await chrome.storage.local.get([VERSION_HISTORY_KEY]);
-        const history = result[VERSION_HISTORY_KEY] || [];
+        // SECURITY FIX P0-037: Sanitize history array from storage
+        let history = result[VERSION_HISTORY_KEY] ? sanitizeObject(result[VERSION_HISTORY_KEY]) : [];
+        if (!Array.isArray(history)) history = [];
 
         // Retornar apenas metadados (sem os dados completos)
         return history.map(v => ({
@@ -219,7 +251,9 @@
     async restoreVersion(versionId) {
       try {
         const result = await chrome.storage.local.get([VERSION_HISTORY_KEY]);
-        const history = result[VERSION_HISTORY_KEY] || [];
+        // SECURITY FIX P0-037: Sanitize history array from storage
+        let history = result[VERSION_HISTORY_KEY] ? sanitizeObject(result[VERSION_HISTORY_KEY]) : [];
+        if (!Array.isArray(history)) history = [];
 
         const version = history.find(v => v.id === versionId);
         if (!version) {
@@ -230,8 +264,9 @@
         // Criar snapshot do estado atual antes de restaurar
         await this.createVersionSnapshot(`Backup antes de restaurar versão ${versionId}`);
 
-        // Restaurar dados da versão
-        await this.saveKnowledge(version.data);
+        // Restaurar dados da versão (sanitize again for safety)
+        const sanitizedData = sanitizeObject(version.data);
+        await this.saveKnowledge(sanitizedData);
 
         console.log('[KnowledgeBase] ✅ Versão restaurada:', versionId);
 
@@ -640,13 +675,16 @@
     async importJSON(json) {
       try {
         const imported = JSON.parse(json);
-        
+
+        // SECURITY FIX P0-037: Sanitize imported JSON to prevent Prototype Pollution
+        const sanitized = sanitizeObject(imported);
+
         // Valida estrutura básica
-        if (!imported.business || !imported.policies || !imported.tone) {
+        if (!sanitized.business || !sanitized.policies || !sanitized.tone) {
           throw new Error('JSON inválido: estrutura incorreta');
         }
 
-        await this.saveKnowledge(imported);
+        await this.saveKnowledge(sanitized);
         console.log('[KnowledgeBase] Conhecimento importado');
         return true;
       } catch (error) {
