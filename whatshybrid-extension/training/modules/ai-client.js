@@ -15,6 +15,38 @@
       this.initialized = false;
     }
 
+    // SECURITY FIX P0-034: Sanitize text to prevent prompt injection
+    _sanitizeForPrompt(text, maxLen = 4000) {
+      if (!text) return '';
+      let clean = String(text);
+
+      // Remove control characters
+      clean = clean.replace(/[\x00-\x1F\x7F]/g, '');
+
+      // Dangerous prompt injection patterns
+      const dangerousPatterns = [
+        /\b(ignore|disregard|forget|override)\s+(all\s+)?(previous|above|prior|earlier)\s*(instructions?|prompts?|rules?|guidelines?)/gi,
+        /\b(you\s+are\s+now|act\s+as|pretend\s+to\s+be|roleplay\s+as)\b/gi,
+        /\b(system\s*:?\s*prompt|new\s+instructions?|jailbreak|bypass)\b/gi,
+        /```(system|instruction|prompt)/gi,
+        /<\|.*?\|>/g,  // Special tokens
+        /\[INST\]|\[\/INST\]/gi  // Instruction tokens
+      ];
+
+      dangerousPatterns.forEach(pattern => {
+        if (pattern.test(clean)) {
+          console.warn('[TrainingAIClient Security] Prompt injection attempt detected and neutralized');
+          clean = clean.replace(pattern, '[FILTERED]');
+        }
+      });
+
+      if (clean.length > maxLen) {
+        clean = clean.substring(0, maxLen) + '...';
+      }
+
+      return clean.trim();
+    }
+
     async init() {
       if (this.initialized) return;
       
@@ -73,6 +105,9 @@
     async _callBackend(messages, lastMessage) {
       if (!this.backendUrl) return null;
       
+      // SECURITY FIX P0-034: Sanitize lastMessage to prevent prompt injection
+      const safeLastMessage = this._sanitizeForPrompt(lastMessage, 2000);
+
       const response = await fetch(`${this.backendUrl}/api/v1/ai/complete`, {
         method: 'POST',
         headers: {
@@ -80,7 +115,7 @@
           ...(this.authToken ? { 'Authorization': `Bearer ${this.authToken}` } : {})
         },
         body: JSON.stringify({
-          messages: [...messages, { role: 'user', content: lastMessage }],
+          messages: [...messages, { role: 'user', content: safeLastMessage }],
           temperature: 0.7,
           maxTokens: 500,
           context: 'training'
@@ -95,11 +130,15 @@
 
     async _callOpenAI(messages, lastMessage, temperature) {
       const systemPrompt = this._buildSystemPrompt();
-      
+
+      // SECURITY FIX P0-034: Sanitize lastMessage to prevent prompt injection
+      const safeLastMessage = this._sanitizeForPrompt(lastMessage, 2000);
+
+      // SECURITY FIX P0-034: Sanitize all message content to prevent prompt injection
       const apiMessages = [
         { role: 'system', content: systemPrompt },
-        ...messages.map(m => ({ role: m.role, content: m.content })),
-        { role: 'user', content: lastMessage }
+        ...messages.map(m => ({ role: m.role, content: this._sanitizeForPrompt(m.content, 2000) })),
+        { role: 'user', content: safeLastMessage }
       ];
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
