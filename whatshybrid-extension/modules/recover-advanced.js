@@ -2592,12 +2592,28 @@
       }
       
       // Method 2: Via DOM (visible messages)
-      const container = document.querySelector(`[data-id="${chatId}"]`);
+      // FIX PEND-MED-006: Multiple fallback selectors for container
+      const containerSelectors = [
+        `[data-id="${chatId}"]`,
+        `div[data-testid*="${chatId}"]`,
+        `div[aria-label*="${chatId}"]`,
+        `#pane-side div[data-id]`, // Generic chat container
+        `.chat[data-id="${chatId}"]`,
+        `div[title*="${chatId}"]`
+      ];
+
+      let container = null;
+      for (const selector of containerSelectors) {
+        container = document.querySelector(selector);
+        if (container) break;
+      }
+
       if (container) {
+        // FIX PEND-MED-006: Deep tree traversal
         const revokedEls = findElements(SELECTORS.RECALLED_MESSAGE, container);
 
         for (const el of revokedEls) {
-          const msgData = extractMessageFromElement(el);
+          const msgData = extractMessageFromElement(el, chatId);
           if (msgData) {
             deleted.push(msgData);
           }
@@ -2613,24 +2629,150 @@
   
   /**
    * BUG 7: Extract message data from DOM element
+   * FIX PEND-MED-006: Proper data extraction with multiple fallbacks
    */
-  function extractMessageFromElement(element) {
+  function extractMessageFromElement(element, chatId) {
     try {
-      const id = element.getAttribute('data-id') || Date.now().toString();
-      const text = element.textContent || '';
-      
+      const id = element.getAttribute('data-id') ||
+                 element.getAttribute('data-testid') ||
+                 Date.now().toString();
+
+      // FIX PEND-MED-006: Extract actual message text with fallbacks
+      const textSelectors = [
+        '.message-in span.selectable-text',
+        '.message-out span.selectable-text',
+        'span[data-testid="conversation-text"]',
+        'div.copyable-text span',
+        '.message-text',
+        'span.selectable-text'
+      ];
+
+      let text = '';
+      for (const selector of textSelectors) {
+        const textEl = element.querySelector(selector);
+        if (textEl) {
+          text = textEl.textContent?.trim() || '';
+          if (text) break;
+        }
+      }
+
+      if (!text) {
+        text = element.textContent?.trim() || '[Deleted message]';
+      }
+
+      // FIX PEND-MED-006: Extract sender info
+      const senderSelectors = [
+        '[data-testid="sender-name"]',
+        '.message-author',
+        'span._11JPr', // WhatsApp class for sender
+        'div[role="button"] span'
+      ];
+
+      let from = chatId || 'Unknown';
+      for (const selector of senderSelectors) {
+        const senderEl = element.querySelector(selector);
+        if (senderEl) {
+          from = senderEl.textContent?.trim() || from;
+          if (from && from !== 'Unknown') break;
+        }
+      }
+
+      // FIX PEND-MED-006: Extract timestamp
+      const timestampSelectors = [
+        '[data-testid="msg-time"]',
+        '.message-time',
+        'span[data-testid="message-timestamp"]',
+        'div[data-pre-plain-text] span'
+      ];
+
+      let timestamp = Date.now();
+      for (const selector of timestampSelectors) {
+        const timeEl = element.querySelector(selector);
+        if (timeEl) {
+          const timeText = timeEl.textContent?.trim();
+          if (timeText) {
+            // Try to parse time (format varies by locale)
+            timestamp = parseMessageTime(timeText) || timestamp;
+            break;
+          }
+        }
+      }
+
+      // FIX PEND-MED-006: Extract media info
+      let mediaType = 'chat';
+      let mediaData = null;
+      const mediaSelectors = {
+        image: ['img[src*="blob"]', 'img[data-testid="media-content"]', '.message-media img'],
+        video: ['video', '[data-testid="video-player"]'],
+        audio: ['audio', '[data-testid="audio-player"]'],
+        document: ['[data-testid="document"]', '.document-icon']
+      };
+
+      for (const [type, selectors] of Object.entries(mediaSelectors)) {
+        for (const selector of selectors) {
+          const mediaEl = element.querySelector(selector);
+          if (mediaEl) {
+            mediaType = type;
+            mediaData = mediaEl.src || mediaEl.href || '__HAS_MEDIA__';
+            break;
+          }
+        }
+        if (mediaData) break;
+      }
+
+      // FIX PEND-MED-006: Detect message direction (incoming vs outgoing)
+      const isOutgoing = element.classList.contains('message-out') ||
+                          element.querySelector('.message-out') ||
+                          element.closest('.message-out');
+
+      const direction = isOutgoing ? 'outgoing' : 'incoming';
+
       return {
         id,
         body: text || '[Deleted message]',
-        type: 'chat',
+        type: mediaType,
         action: 'revoked',
-        timestamp: Date.now(),
-        from: 'Unknown',
-        to: 'Unknown'
+        timestamp,
+        from: from,
+        to: direction === 'outgoing' ? chatId : 'Me',
+        mediaData,
+        direction,
+        // Extra metadata for debugging
+        extractedFrom: 'DOM',
+        chatId: chatId || 'Unknown'
       };
     } catch (e) {
+      console.warn('[RecoverAdvanced] extractMessageFromElement error:', e);
       return null;
     }
+  }
+
+  /**
+   * Helper: Parse message time from text
+   */
+  function parseMessageTime(timeText) {
+    try {
+      // Try common formats: "10:30 AM", "15:45", etc.
+      const now = new Date();
+      const timeMatch = timeText.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+
+      if (timeMatch) {
+        let hours = parseInt(timeMatch[1]);
+        const minutes = parseInt(timeMatch[2]);
+        const isPM = timeMatch[3]?.toLowerCase() === 'pm';
+
+        if (isPM && hours < 12) hours += 12;
+        if (!isPM && hours === 12) hours = 0;
+
+        const parsed = new Date(now);
+        parsed.setHours(hours, minutes, 0, 0);
+
+        return parsed.getTime();
+      }
+    } catch (e) {
+      // Parsing failed, return null to use fallback
+    }
+    return null;
   }
   
   /**
