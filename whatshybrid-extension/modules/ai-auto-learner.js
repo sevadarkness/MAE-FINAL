@@ -20,6 +20,34 @@
   const MAX_PENDING_LEARNINGS = 100;
 
   // ============================================
+  // 🛡️ SECURITY: Prototype Pollution Protection
+  // ============================================
+
+  // SECURITY FIX P0-040: Prevent Prototype Pollution from storage
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        if (Array.isArray(value)) {
+          sanitized[key] = value.map(item =>
+            (item && typeof item === 'object') ? sanitizeObject(item) : item
+          );
+        } else if (value && typeof value === 'object') {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
+  // ============================================
   // 🛡️ SECURITY: Training Data Sanitization
   // ============================================
 
@@ -105,18 +133,20 @@
       try {
         const data = await chrome.storage.local.get(STORAGE_KEY);
         if (data[STORAGE_KEY]) {
-          const stored = JSON.parse(data[STORAGE_KEY]);
+          // SECURITY FIX P0-040: Sanitize to prevent Prototype Pollution
+          const parsed = JSON.parse(data[STORAGE_KEY]);
+          const stored = sanitizeObject(parsed);
           this.pendingLearnings = stored.pendingLearnings || [];
           this.corrections = stored.corrections || [];
           this.metrics = stored.metrics || this.metrics;
-          
+
           if (stored.patterns) {
             Object.entries(stored.patterns).forEach(([key, value]) => {
               this.patterns.set(key, value);
             });
           }
         }
-        
+
         this.initialized = true;
         this.start();
         

@@ -19,6 +19,30 @@
   const DEFAULT_TTL = 24 * 60 * 60 * 1000; // 24 horas
   const MAX_CACHE_SIZE = 500;
 
+  // SECURITY FIX P0-039: Prevent Prototype Pollution from storage
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        if (Array.isArray(value)) {
+          sanitized[key] = value.map(item =>
+            (item && typeof item === 'object') ? sanitizeObject(item) : item
+          );
+        } else if (value && typeof value === 'object') {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   class AIResponseCache {
     constructor() {
       this.cache = new Map();
@@ -40,14 +64,16 @@
       try {
         const data = await chrome.storage.local.get(STORAGE_KEY);
         if (data[STORAGE_KEY]) {
-          const stored = JSON.parse(data[STORAGE_KEY]);
+          // SECURITY FIX P0-039: Sanitize to prevent Prototype Pollution
+          const parsed = JSON.parse(data[STORAGE_KEY]);
+          const stored = sanitizeObject(parsed);
           Object.entries(stored.cache || {}).forEach(([key, value]) => {
             this.cache.set(key, value);
           });
           this.metrics = stored.metrics || this.metrics;
           console.log('[AIResponseCache] Cache carregado:', this.cache.size, 'entradas');
         }
-        
+
         this.initialized = true;
         this.startCleanupInterval();
         

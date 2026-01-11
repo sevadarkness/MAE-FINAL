@@ -19,6 +19,30 @@
     ENABLED: true
   };
 
+  // SECURITY FIX P0-038: Prevent Prototype Pollution from storage
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        if (Array.isArray(value)) {
+          sanitized[key] = value.map(item =>
+            (item && typeof item === 'object') ? sanitizeObject(item) : item
+          );
+        } else if (value && typeof value === 'object') {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   let state = {
     baseUrl: null,
     accessToken: null,
@@ -119,21 +143,25 @@
     try {
       const stored = await chrome.storage.local.get(CONFIG.STORAGE_KEY);
       if (stored[CONFIG.STORAGE_KEY]) {
+        // SECURITY FIX P0-038: Sanitize to prevent Prototype Pollution
         const loaded = JSON.parse(stored[CONFIG.STORAGE_KEY]);
-        state = { ...state, ...loaded };
+        const sanitized = sanitizeObject(loaded);
+        state = { ...state, ...sanitized };
       }
 
       // Migração/compat: se não houver token no schema novo, tentar recuperar do legado
       if (!state.accessToken) {
         const legacy = await chrome.storage.local.get(['whl_backend_config', 'backend_url', 'backend_token', 'whl_backend_url']);
-        const legacyCfg = legacy?.whl_backend_config;
+        // SECURITY FIX P0-038: Sanitize legacy config to prevent Prototype Pollution
+        const sanitizedLegacy = sanitizeObject(legacy);
+        const legacyCfg = sanitizedLegacy?.whl_backend_config;
 
         const legacyUrl =
           normalizeBaseUrl(legacyCfg?.url) ||
-          normalizeBaseUrl(legacy?.backend_url) ||
-          normalizeBaseUrl(legacy?.whl_backend_url) ||
+          normalizeBaseUrl(sanitizedLegacy?.backend_url) ||
+          normalizeBaseUrl(sanitizedLegacy?.whl_backend_url) ||
           '';
-        const legacyToken = legacyCfg?.token || legacy?.backend_token || null;
+        const legacyToken = legacyCfg?.token || sanitizedLegacy?.backend_token || null;
 
         if (legacyUrl) state.baseUrl = legacyUrl;
         if (legacyToken) state.accessToken = legacyToken;

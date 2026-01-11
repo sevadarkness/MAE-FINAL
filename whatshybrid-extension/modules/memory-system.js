@@ -30,6 +30,28 @@
   const MEMORY_SYNC_QUEUE_KEY = 'whl_memory_sync_queue';
   const WHL_DEBUG = (typeof localStorage !== 'undefined' && localStorage.getItem('whl_debug') === 'true');
 
+  // SECURITY FIX P0-036: Prevent Prototype Pollution from storage
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        // Recursively sanitize nested objects
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   function isValidName(name) {
     if (!name) return false;
     const trimmed = String(name).trim();
@@ -87,8 +109,10 @@
         const data = await chrome.storage.local.get(STORAGE_KEY);
         if (data[STORAGE_KEY]) {
           const stored = JSON.parse(data[STORAGE_KEY]);
+          // SECURITY FIX P0-036: Sanitize each memory to prevent Prototype Pollution
           Object.entries(stored).forEach(([key, value]) => {
-            this.memories.set(key, value);
+            const sanitizedValue = sanitizeObject(value);
+            this.memories.set(key, sanitizedValue);
           });
           if (WHL_DEBUG) console.log('[MemorySystem] Memórias carregadas:', this.memories.size);
         }
