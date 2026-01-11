@@ -641,8 +641,42 @@
     state.isProcessing = true;
 
     try {
-      // Pegar batch
-      const batch = state.queue.splice(0, CONFIG.BATCH_SIZE);
+      // FIX PEND-MED-004: Filter messages ready for retry (exponential backoff)
+      const now = Date.now();
+      const readyMessages = [];
+      const notReadyMessages = [];
+
+      for (const msg of state.queue) {
+        const retryCount = msg.retryCount || 0;
+        const lastRetryTime = msg.lastRetryTime || 0;
+
+        if (retryCount === 0) {
+          // First attempt - always ready
+          readyMessages.push(msg);
+        } else {
+          // Calculate exponential backoff delay: RETRY_DELAY * 2^(retryCount - 1)
+          const backoffDelay = CONFIG.RETRY_DELAY * Math.pow(2, retryCount - 1);
+          const timeSinceLastRetry = now - lastRetryTime;
+
+          if (timeSinceLastRetry >= backoffDelay) {
+            readyMessages.push(msg);
+          } else {
+            notReadyMessages.push(msg);
+          }
+        }
+      }
+
+      // Keep not-ready messages in queue
+      state.queue = notReadyMessages;
+
+      // Pegar batch from ready messages
+      const batch = readyMessages.splice(0, CONFIG.BATCH_SIZE);
+
+      // If no messages ready, exit early
+      if (batch.length === 0) {
+        state.isProcessing = false;
+        return;
+      }
 
       // Obter configurações do backend (compat: múltiplos schemas)
       const settings = await chrome.storage.local.get([
@@ -710,12 +744,32 @@
             state.stats.failed++;
             // Re-enfileirar mensagens com falha (se não for erro 4xx)
             if (response.status >= 500) {
-              state.queue.push(msg);
+              // FIX PEND-MED-004: Track retry count and use exponential backoff
+              const retryCount = (msg.retryCount || 0) + 1;
+              if (retryCount <= CONFIG.MAX_RETRIES) {
+                state.queue.push({
+                  ...msg,
+                  retryCount,
+                  lastRetryTime: Date.now()
+                });
+              } else {
+                console.warn('[MessageCapture] Message exceeded max retries:', msg.id);
+              }
             }
           }
         } catch (e) {
           state.stats.failed++;
-          state.queue.push(msg); // Re-enfileirar para retry
+          // FIX PEND-MED-004: Track retry count and use exponential backoff
+          const retryCount = (msg.retryCount || 0) + 1;
+          if (retryCount <= CONFIG.MAX_RETRIES) {
+            state.queue.push({
+              ...msg,
+              retryCount,
+              lastRetryTime: Date.now()
+            });
+          } else {
+            console.warn('[MessageCapture] Message exceeded max retries:', msg.id);
+          }
         }
       }
 

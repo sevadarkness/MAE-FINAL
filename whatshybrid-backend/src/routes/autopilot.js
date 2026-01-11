@@ -11,10 +11,12 @@ const express = require('express');
 const router = express.Router();
 const { AutoPilotService } = require('../ai/services/AutoPilotService');
 const { authenticate } = require('../middleware/auth');
+const { checkSubscription } = require('../middleware/subscription');
 const logger = require('../utils/logger');
 
-// SEGURANÇA: Aplicar autenticação em TODAS as rotas deste router
+// FIX PEND-HIGH-002: Aplicar autenticação e verificação de assinatura em TODAS as rotas
 router.use(authenticate);
+router.use(checkSubscription('autopilot')); // AutoPilot requer plano starter ou superior
 
 // Initialize service
 let service = null;

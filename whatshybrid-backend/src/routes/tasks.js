@@ -27,8 +27,8 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
 
 router.get('/overdue', authenticate, asyncHandler(async (req, res) => {
   const tasks = db.all(
-    `SELECT t.*, c.name as contact_name FROM tasks t 
-     LEFT JOIN contacts c ON t.contact_id = c.id 
+    `SELECT t.*, c.name as contact_name FROM tasks t
+     LEFT JOIN contacts c ON t.contact_id = c.id
      WHERE t.workspace_id = ? AND t.status != 'completed' AND t.due_date < datetime('now')
      ORDER BY t.due_date ASC`,
     [req.workspaceId]
@@ -36,70 +36,7 @@ router.get('/overdue', authenticate, asyncHandler(async (req, res) => {
   res.json({ tasks });
 }));
 
-router.get('/:id', authenticate, asyncHandler(async (req, res) => {
-  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
-  if (!task) throw new AppError('Task not found', 404);
-  res.json({ task });
-}));
-
-router.post('/', authenticate, asyncHandler(async (req, res) => {
-  const { title, description, type, priority, due_date, contact_id, deal_id, assigned_to } = req.body;
-  const id = uuidv4();
-  db.run(
-    `INSERT INTO tasks (id, workspace_id, title, description, type, priority, due_date, contact_id, deal_id, assigned_to, created_by)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, req.workspaceId, title, description, type || 'todo', priority || 'medium', due_date, contact_id, deal_id, assigned_to || req.userId, req.userId]
-  );
-  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task criada
-  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
-  const io = req.app.get('io');
-  io.to(`workspace:${req.workspaceId}`).emit('task:created', task);
-  res.status(201).json({ task });
-}));
-
-router.put('/:id', authenticate, asyncHandler(async (req, res) => {
-  const { title, description, type, priority, status, due_date, assigned_to } = req.body;
-  const updates = [], values = [];
-  if (title) { updates.push('title = ?'); values.push(title); }
-  if (description !== undefined) { updates.push('description = ?'); values.push(description); }
-  if (type) { updates.push('type = ?'); values.push(type); }
-  if (priority) { updates.push('priority = ?'); values.push(priority); }
-  if (status) { 
-    updates.push('status = ?'); 
-    values.push(status); 
-    if (status === 'completed') updates.push('completed_at = CURRENT_TIMESTAMP');
-  }
-  if (due_date) { updates.push('due_date = ?'); values.push(due_date); }
-  if (assigned_to) { updates.push('assigned_to = ?'); values.push(assigned_to); }
-  
-  if (updates.length === 0) {
-    throw new AppError('No fields to update', 400);
-  }
-  
-  updates.push('updated_at = CURRENT_TIMESTAMP');
-  values.push(req.params.id, req.workspaceId);
-  db.run(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
-  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task atualizada
-  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
-  const io = req.app.get('io');
-  io.to(`workspace:${req.workspaceId}`).emit('task:updated', task);
-  res.json({ task });
-}));
-
-router.post('/:id/complete', authenticate, asyncHandler(async (req, res) => {
-  db.run('UPDATE tasks SET status = "completed", completed_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
-  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task completada
-  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
-  const io = req.app.get('io');
-  io.to(`workspace:${req.workspaceId}`).emit('task:completed', task);
-  res.json({ task });
-}));
-
-router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
-  db.run('DELETE FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
-  res.json({ message: 'Task deleted' });
-}));
-
+// FIX PEND-HIGH-003: Mover rotas /data e /sync ANTES de /:id para evitar conflito de roteamento
 // ===== SYNC (para extensão) =====
 
 /**
@@ -200,6 +137,71 @@ router.get('/data', authenticate, asyncHandler(async (req, res) => {
       lastSync: new Date().toISOString()
     }
   });
+}));
+
+// Rotas parametrizadas DEVEM vir DEPOIS de rotas específicas
+router.get('/:id', authenticate, asyncHandler(async (req, res) => {
+  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
+  if (!task) throw new AppError('Task not found', 404);
+  res.json({ task });
+}));
+
+router.post('/', authenticate, asyncHandler(async (req, res) => {
+  const { title, description, type, priority, due_date, contact_id, deal_id, assigned_to } = req.body;
+  const id = uuidv4();
+  db.run(
+    `INSERT INTO tasks (id, workspace_id, title, description, type, priority, due_date, contact_id, deal_id, assigned_to, created_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, req.workspaceId, title, description, type || 'todo', priority || 'medium', due_date, contact_id, deal_id, assigned_to || req.userId, req.userId]
+  );
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task criada
+  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [id, req.workspaceId]);
+  const io = req.app.get('io');
+  io.to(`workspace:${req.workspaceId}`).emit('task:created', task);
+  res.status(201).json({ task });
+}));
+
+router.put('/:id', authenticate, asyncHandler(async (req, res) => {
+  const { title, description, type, priority, status, due_date, assigned_to } = req.body;
+  const updates = [], values = [];
+  if (title) { updates.push('title = ?'); values.push(title); }
+  if (description !== undefined) { updates.push('description = ?'); values.push(description); }
+  if (type) { updates.push('type = ?'); values.push(type); }
+  if (priority) { updates.push('priority = ?'); values.push(priority); }
+  if (status) { 
+    updates.push('status = ?'); 
+    values.push(status); 
+    if (status === 'completed') updates.push('completed_at = CURRENT_TIMESTAMP');
+  }
+  if (due_date) { updates.push('due_date = ?'); values.push(due_date); }
+  if (assigned_to) { updates.push('assigned_to = ?'); values.push(assigned_to); }
+  
+  if (updates.length === 0) {
+    throw new AppError('No fields to update', 400);
+  }
+  
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(req.params.id, req.workspaceId);
+  db.run(`UPDATE tasks SET ${updates.join(', ')} WHERE id = ? AND workspace_id = ?`, values);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task atualizada
+  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
+  const io = req.app.get('io');
+  io.to(`workspace:${req.workspaceId}`).emit('task:updated', task);
+  res.json({ task });
+}));
+
+router.post('/:id/complete', authenticate, asyncHandler(async (req, res) => {
+  db.run('UPDATE tasks SET status = "completed", completed_at = CURRENT_TIMESTAMP WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
+  // SECURITY FIX (RISK-003): Validar workspace_id ao recuperar task completada
+  const task = db.get('SELECT * FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
+  const io = req.app.get('io');
+  io.to(`workspace:${req.workspaceId}`).emit('task:completed', task);
+  res.json({ task });
+}));
+
+router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
+  db.run('DELETE FROM tasks WHERE id = ? AND workspace_id = ?', [req.params.id, req.workspaceId]);
+  res.json({ message: 'Task deleted' });
 }));
 
 module.exports = router;

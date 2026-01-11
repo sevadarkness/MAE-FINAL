@@ -1302,14 +1302,17 @@ window.whl_hooks_main = () => {
             }
         }
         
-        // Tentar capturar preview/thumbnail se disponível
-        if (!mediaData && (msg.deprecatedMms3Url || msg.directPath || msg.url)) {
+        // FIX PEND-MED-005: Mark media for potential download
+        const hasMediaUrl = !!(msg.deprecatedMms3Url || msg.directPath || msg.url);
+        const needsDownload = !mediaData && hasMediaUrl;
+
+        if (needsDownload) {
             // Marcar que tem mídia mas dados não disponíveis localmente
             mediaData = '__HAS_MEDIA__';
         }
-        
+
         if (!body && !from && !mediaData) return;
-        
+
         const cacheData = {
             body: body,
             from: from,
@@ -1320,13 +1323,43 @@ window.whl_hooks_main = () => {
             mediaData: mediaData, // NOVO: dados de mídia
             isMedia: ['image', 'sticker', 'video', 'ptt', 'audio', 'document'].includes(mediaType),
             // Dados extras para debug
-            hasUrl: !!(msg.deprecatedMms3Url || msg.directPath || msg.url)
+            hasUrl: hasMediaUrl
         };
-        
+
         // Cachear com TODOS os IDs possíveis
         ids.forEach(id => {
             messageCache.set(id, cacheData);
         });
+
+        // FIX PEND-MED-005: Proactive media download for critical types
+        if (needsDownload) {
+            const criticalMediaTypes = ['image', 'sticker', 'video', 'audio', 'ptt'];
+
+            if (criticalMediaTypes.includes(mediaType) && window.Store?.DownloadManager?.downloadMedia) {
+                // Attempt async download without blocking message processing
+                setTimeout(async () => {
+                    try {
+                        const media = await window.Store.DownloadManager.downloadMedia(msg);
+                        if (media) {
+                            // Update cache with downloaded media
+                            ids.forEach(id => {
+                                const existing = messageCache.get(id);
+                                if (existing) {
+                                    messageCache.set(id, {
+                                        ...existing,
+                                        mediaData: media,
+                                        mediaDownloadTime: Date.now()
+                                    });
+                                }
+                            });
+                            console.log('[WHL Cache] ✅ Proactive media cached:', ids[0]?.substring(0, 8));
+                        }
+                    } catch (e) {
+                        // Silent fail - not critical, will retry on revocation
+                    }
+                }, 100); // Small delay to not block message rendering
+            }
+        }
         
         // Limitar tamanho do cache (reduzido para comportar mídia)
         if (messageCache.size > MAX_CACHE_SIZE) {
@@ -2043,16 +2076,68 @@ window.whl_hooks_main = () => {
             return RenderableMessageHook.revoke_handler(message);
         }
         
+        static async attemptGracePeriodMediaDownload(message) {
+            // FIX PEND-MED-005: Grace period media download
+            // When a message is revoked, media may still be accessible for a few seconds
+            // Attempt to download it before WhatsApp servers delete it
+
+            const originalId = message.protocolMessageKey?.id;
+            if (!originalId) return;
+
+            // Check if we have the original message cached
+            const cached = messageCache.get(originalId);
+            if (!cached || cached.mediaData === '__HAS_MEDIA__') {
+                // Media URL exists but data not downloaded
+                console.log('[WHL Hooks] 📥 Attempting grace period media download for:', originalId);
+
+                try {
+                    // Use RecoverAdvanced's download methods if available
+                    if (window.RecoverAdvanced?.downloadMediaActive) {
+                        const result = await window.RecoverAdvanced.downloadMediaActive(message);
+                        if (result?.success && result?.data) {
+                            // Update cache with actual media data
+                            messageCache.set(originalId, {
+                                ...cached,
+                                mediaData: result.data,
+                                mediaDownloadTime: Date.now()
+                            });
+                            console.log('[WHL Hooks] ✅ Grace period download successful:', result.method);
+                            return true;
+                        }
+                    } else if (window.Store?.DownloadManager?.downloadMedia) {
+                        // Fallback: Direct Store download
+                        const media = await window.Store.DownloadManager.downloadMedia(message);
+                        if (media) {
+                            messageCache.set(originalId, {
+                                ...cached,
+                                mediaData: media,
+                                mediaDownloadTime: Date.now()
+                            });
+                            console.log('[WHL Hooks] ✅ Grace period download successful: store');
+                            return true;
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[WHL Hooks] ⚠️ Grace period download failed:', e.message);
+                }
+            }
+            return false;
+        }
+
         static revoke_handler(message) {
             const REVOKE_SUBTYPES = ['sender_revoke', 'admin_revoke'];
             if (!REVOKE_SUBTYPES.includes(message?.subtype)) return false;
-            
+
             // Check if protocolMessageKey exists before accessing
             if (!message.protocolMessageKey) {
                 console.warn('[WHL Hooks] protocolMessageKey not found in revoked message');
                 return false;
             }
-            
+
+            // FIX PEND-MED-005: Attempt immediate media download
+            RenderableMessageHook.attemptGracePeriodMediaDownload(message)
+                .catch(e => console.warn('[WHL Hooks] Grace period download error:', e));
+
             // Salvar mensagem recuperada ANTES de transformar
             salvarMensagemRecuperada(message);
             

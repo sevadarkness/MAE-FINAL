@@ -31,49 +31,43 @@
     
     // Dados a serem sincronizados
     SYNC_MODULES: {
-      crm_contacts: {
-        localKey: 'whl_crm_contacts',
-        endpoint: '/api/v1/crm/contacts/sync',
+      // FIX PEND-CRIT-002: Corrigido endpoint CRM sync (usar /api/v1/crm/sync ao invés de rotas individuais)
+      crm: {
+        localKey: 'whl_crm_data',
+        endpoint: '/api/v1/crm/sync', // FIXED: Endpoint unificado para CRM (contacts + deals + pipeline)
         priority: 'high'
       },
-      crm_deals: {
-        localKey: 'whl_crm_deals',
-        endpoint: '/api/v1/crm/deals/sync',
-        priority: 'high'
-      },
-      crm_pipelines: {
-        localKey: 'whl_crm_pipelines',
-        endpoint: '/api/v1/crm/pipelines/sync',
+      // FIX PEND-CRIT-003: Corrigido endpoint Tasks sync
+      // FIX PEND-MED-007: Use correct storage key (whl_tasks_v2, not whl_tasks)
+      tasks: {
+        localKey: 'whl_tasks_v2',
+        endpoint: '/api/v1/tasks/sync', // FIXED: Era /api/v1/crm/tasks/sync (incorreto)
         priority: 'medium'
       },
-      crm_tasks: {
-        localKey: 'whl_crm_tasks',
-        endpoint: '/api/v1/crm/tasks/sync',
-        priority: 'medium'
-      },
-      crm_labels: {
-        localKey: 'whl_crm_labels',
-        endpoint: '/api/v1/crm/labels/sync',
+      labels: {
+        localKey: 'whl_labels',
+        endpoint: '/api/v1/crm/labels/sync', // Labels tem endpoint separado em CRM
         priority: 'low'
       },
       recover_history: {
         localKey: 'whl_recover_history',
-        endpoint: '/api/v1/recover/sync',
+        endpoint: '/api/recover/history/sync', // Endpoint recover-sync.js
         priority: 'high'
       },
-      recover_visual_markers: {
-        localKey: 'whl_recover_visual_markers',
-        endpoint: '/api/v1/recover/markers/sync',
-        priority: 'low'
-      },
+      // FIX PEND-CRIT-001: Corrigido endpoint few-shot sync
       ai_training_examples: {
         localKey: 'whl_few_shot_examples',
-        endpoint: '/api/v1/ai/learn/examples/sync',
+        endpoint: '/api/v1/ai/few-shot/sync', // FIXED: Era /api/v1/ai/learn/examples/sync (não existe)
         priority: 'medium'
       },
       ai_memory: {
         localKey: 'whl_ai_memory',
-        endpoint: '/api/v1/ai/learn/memory/sync',
+        endpoint: '/api/v1/memory/sync', // Endpoint memory.js
+        priority: 'medium'
+      },
+      knowledge: {
+        localKey: 'whl_knowledge_base',
+        endpoint: '/api/v1/knowledge/sync', // Endpoint knowledge.js
         priority: 'medium'
       },
       quick_replies: {
@@ -206,8 +200,9 @@
   // LISTENER DE MUDANÇAS LOCAIS
   // ============================================
   function setupStorageListener() {
-    // Listener para chrome.storage
-    chrome.storage.onChanged.addListener((changes, areaName) => {
+    // FIX PEND-MED-008: Use TabCoordinator for leader-only storage listening
+    // This prevents duplicate processing when multiple WhatsApp tabs are open
+    const listenerCallback = (changes, areaName) => {
       if (areaName !== 'local') return;
 
       for (const [key, { oldValue, newValue }] of Object.entries(changes)) {
@@ -230,7 +225,21 @@
           scheduleSync(moduleName);
         }
       }
-    });
+    };
+
+    // FIX PEND-MED-008: Register with TabCoordinator if available
+    if (window.TabCoordinator?.addStorageListener) {
+      // Use leader-only pattern to prevent duplicate syncs across tabs
+      window.TabCoordinator.addStorageListener(listenerCallback, {
+        leaderOnly: true,  // Only leader tab syncs to backend
+        broadcastToOthers: false  // Other tabs don't need notification
+      });
+      console.log('[DataSyncManager] ✅ Storage listener registered with TabCoordinator (leader-only)');
+    } else {
+      // Fallback: Direct registration if TabCoordinator not available
+      chrome.storage.onChanged.addListener(listenerCallback);
+      console.warn('[DataSyncManager] ⚠️ TabCoordinator not available, using direct listener (may duplicate across tabs)');
+    }
   }
 
   function scheduleSync(moduleName) {

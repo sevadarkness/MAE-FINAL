@@ -11,9 +11,20 @@
   const CONFIG = {
     STORAGE_KEY: 'whl_backend_client',
     DEFAULT_BASE_URL: 'http://localhost:3000',
+    // FIX PEND-MED-001: Fallback backend URLs for high availability
+    FALLBACK_URLS: [
+      'http://localhost:3000',      // Primary (desenvolvimento)
+      'http://localhost:3001',      // Secondary (se rodando múltiplas instâncias)
+      // Adicionar URLs de produção/staging quando disponíveis:
+      // 'https://api.whatshybrid.com',
+      // 'https://api-backup.whatshybrid.com'
+    ],
     REQUEST_TIMEOUT: 30000,
     RETRY_ATTEMPTS: 3,
     RETRY_DELAY: 1000,
+    HEALTH_CHECK_INTERVAL: 60000,  // Check backend health every 60s
+    HEALTH_CHECK_TIMEOUT: 5000,     // Health check timeout
+    MAX_HEALTH_FAILURES: 3,         // Switch to fallback after 3 failed health checks
     // ✅ BACKEND HABILITADO
     // Configure o backend em localhost:3000 antes de usar
     ENABLED: true
@@ -50,7 +61,16 @@
     user: null,
     workspace: null,
     connected: false,
-    socket: null
+    socket: null,
+    // FIX PEND-MED-001: Backend health tracking for failover
+    backendHealth: {
+      currentUrlIndex: 0,           // Index into FALLBACK_URLS
+      consecutiveFailures: 0,       // Track failures for current backend
+      lastHealthCheck: 0,           // Timestamp of last health check
+      healthCheckTimer: null,       // Interval timer for health checks
+      isHealthy: true,              // Overall health status
+      failoverHistory: []           // Track failover events for monitoring
+    }
   };
 
   let initialized = false;
@@ -103,6 +123,156 @@
   }
 
   // ============================================
+  // FIX PEND-MED-001: HEALTH CHECK & FAILOVER
+  // ============================================
+
+  /**
+   * Gets the current backend URL with failover support
+   * @returns {string} Current backend URL
+   */
+  function getCurrentBackendUrl() {
+    if (state.baseUrl) {
+      return state.baseUrl;
+    }
+
+    // Use failover URL if available
+    const urlIndex = state.backendHealth.currentUrlIndex;
+    return CONFIG.FALLBACK_URLS[urlIndex] || CONFIG.DEFAULT_BASE_URL;
+  }
+
+  /**
+   * Checks backend health status
+   * @returns {Promise<boolean>} true if healthy, false otherwise
+   */
+  async function checkBackendHealth() {
+    const url = getCurrentBackendUrl();
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), CONFIG.HEALTH_CHECK_TIMEOUT);
+
+      const response = await fetch(`${url}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        // Reset failure counter on success
+        state.backendHealth.consecutiveFailures = 0;
+        state.backendHealth.isHealthy = true;
+        state.backendHealth.lastHealthCheck = Date.now();
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.warn('[BackendClient] Health check failed:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Handles backend failure and attempts failover
+   */
+  async function handleBackendFailure() {
+    state.backendHealth.consecutiveFailures++;
+
+    console.warn(`[BackendClient] Backend failure ${state.backendHealth.consecutiveFailures}/${CONFIG.MAX_HEALTH_FAILURES}`);
+
+    // Failover if exceeded max failures
+    if (state.backendHealth.consecutiveFailures >= CONFIG.MAX_HEALTH_FAILURES) {
+      await attemptFailover();
+    }
+  }
+
+  /**
+   * Attempts to failover to next backend URL
+   */
+  async function attemptFailover() {
+    const currentIndex = state.backendHealth.currentUrlIndex;
+    const nextIndex = (currentIndex + 1) % CONFIG.FALLBACK_URLS.length;
+
+    // If we've tried all URLs, stay on last one but log error
+    if (nextIndex === 0 && state.backendHealth.failoverHistory.length > 0) {
+      console.error('[BackendClient] All fallback backends failed. Staying on current URL.');
+      state.backendHealth.isHealthy = false;
+      return;
+    }
+
+    const previousUrl = CONFIG.FALLBACK_URLS[currentIndex];
+    const nextUrl = CONFIG.FALLBACK_URLS[nextIndex];
+
+    console.warn(`[BackendClient] Failing over: ${previousUrl} → ${nextUrl}`);
+
+    state.backendHealth.currentUrlIndex = nextIndex;
+    state.backendHealth.consecutiveFailures = 0;
+    state.baseUrl = nextUrl;
+
+    // Record failover event
+    state.backendHealth.failoverHistory.push({
+      timestamp: Date.now(),
+      from: previousUrl,
+      to: nextUrl,
+      reason: 'health_check_failure'
+    });
+
+    // Keep only last 10 failover events
+    if (state.backendHealth.failoverHistory.length > 10) {
+      state.backendHealth.failoverHistory = state.backendHealth.failoverHistory.slice(-10);
+    }
+
+    // Sync updated URL to legacy configs
+    await syncLegacyBackendConfig();
+    await saveState();
+
+    // Emit failover event
+    if (window.EventBus) {
+      window.EventBus.emit('backend:failover', {
+        from: previousUrl,
+        to: nextUrl
+      });
+    }
+  }
+
+  /**
+   * Starts periodic health checks
+   */
+  function startHealthChecks() {
+    // Clear existing timer
+    if (state.backendHealth.healthCheckTimer) {
+      clearInterval(state.backendHealth.healthCheckTimer);
+    }
+
+    // Perform initial health check
+    checkBackendHealth();
+
+    // Schedule periodic checks
+    state.backendHealth.healthCheckTimer = setInterval(async () => {
+      const isHealthy = await checkBackendHealth();
+
+      if (!isHealthy) {
+        await handleBackendFailure();
+      }
+    }, CONFIG.HEALTH_CHECK_INTERVAL);
+
+    console.log(`[BackendClient] Health checks started (interval: ${CONFIG.HEALTH_CHECK_INTERVAL}ms)`);
+  }
+
+  /**
+   * Stops periodic health checks
+   */
+  function stopHealthChecks() {
+    if (state.backendHealth.healthCheckTimer) {
+      clearInterval(state.backendHealth.healthCheckTimer);
+      state.backendHealth.healthCheckTimer = null;
+      console.log('[BackendClient] Health checks stopped');
+    }
+  }
+
+  // ============================================
   // INICIALIZAÇÃO
   // ============================================
   async function init() {
@@ -130,6 +300,9 @@
 
       initialized = true;
       console.log('[BackendClient] ✅ Inicializado');
+
+      // FIX PEND-MED-001: Start health checks for failover monitoring
+      startHealthChecks();
 
       if (window.EventBus) {
         window.EventBus.emit('backend:initialized', { connected: state.connected });
@@ -199,7 +372,8 @@
   }
 
   function getBaseUrl() {
-    return state.baseUrl || CONFIG.DEFAULT_BASE_URL;
+    // FIX PEND-MED-001: Use getCurrentBackendUrl() for automatic failover support
+    return getCurrentBackendUrl();
   }
 
   function isConnected() {
@@ -265,6 +439,12 @@
         return data;
       } catch (error) {
         lastError = error;
+
+        // FIX PEND-MED-001: Track backend failures for automatic failover
+        if (error.name === 'AbortError' || error.message.includes('fetch')) {
+          await handleBackendFailure();
+        }
+
         if (attempt < CONFIG.RETRY_ATTEMPTS - 1) {
           await sleep(CONFIG.RETRY_DELAY * Math.pow(2, attempt));
         }
@@ -852,7 +1032,7 @@
     // Sync
     syncContacts,
     syncAll,
-    
+
     // Real-time Sync
     syncContactsRealtime,
     syncDealsRealtime,
@@ -860,6 +1040,13 @@
     syncMessagesRealtime,
     syncAllRealtime,
     updateSidepanelSocketUI,
+
+    // FIX PEND-MED-001: Health Check & Failover
+    checkBackendHealth,
+    getCurrentBackendUrl,
+    startHealthChecks,
+    stopHealthChecks,
+    getBackendHealth: () => ({ ...state.backendHealth }),
     
     // Raw HTTP
     get,

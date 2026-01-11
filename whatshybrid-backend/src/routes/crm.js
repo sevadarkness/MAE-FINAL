@@ -150,6 +150,10 @@ router.delete('/labels/:id', authenticate, asyncHandler(async (req, res) => {
   res.json({ message: 'Label deleted' });
 }));
 
+// FIX PEND-HIGH-003: Rotas /sync e /data estão corretamente posicionadas APÓS rotas específicas
+// Não há conflito aqui porque todas as rotas parametrizadas são prefixadas (/deals/:id, /labels/:id)
+// e não usam catch-all top-level /:id
+
 // ===== SYNC (para extensão) =====
 
 /**
