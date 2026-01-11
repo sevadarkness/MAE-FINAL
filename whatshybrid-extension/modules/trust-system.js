@@ -24,6 +24,28 @@
 
   const STORAGE_KEY = 'whl_trust_system_v1';
 
+  // SECURITY FIX P0-035: Prevent Prototype Pollution from storage
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        // Recursively sanitize nested objects
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   // Definição de níveis
   const LEVELS = {
     BEGINNER: {
@@ -162,7 +184,9 @@
     try {
       const result = await chrome.storage.local.get(STORAGE_KEY);
       if (result[STORAGE_KEY]) {
-        state = { ...state, ...result[STORAGE_KEY] };
+        // SECURITY FIX P0-035: Sanitize before spreading to prevent Prototype Pollution
+        const sanitized = sanitizeObject(result[STORAGE_KEY]);
+        state = { ...state, ...sanitized };
         console.log('[TrustSystem] Estado carregado:', state.totalPoints, 'pontos');
       }
     } catch (e) {

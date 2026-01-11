@@ -22,6 +22,28 @@
     BACKEND_URL: 'http://localhost:3000'
   };
 
+  // SECURITY FIX P0-035: Prevent Prototype Pollution from external data
+  function sanitizeObject(obj) {
+    if (!obj || typeof obj !== 'object') return {};
+
+    const dangerousKeys = ['__proto__', 'constructor', 'prototype'];
+    const sanitized = {};
+
+    for (const key in obj) {
+      if (obj.hasOwnProperty(key) && !dangerousKeys.includes(key)) {
+        const value = obj[key];
+        // Recursively sanitize nested objects
+        if (value && typeof value === 'object' && !Array.isArray(value)) {
+          sanitized[key] = sanitizeObject(value);
+        } else {
+          sanitized[key] = value;
+        }
+      }
+    }
+
+    return sanitized;
+  }
+
   // PEND-MED-006: Múltiplos seletores CSS para resiliência contra mudanças do WhatsApp
   const SELECTORS = {
     CHATLIST_HEADER: [
@@ -466,12 +488,15 @@
       if (Array.isArray(saved)) {
         // CORREÇÃO 4.1: Aplicar análise de sentimento ao carregar mensagens
         let messages = saved.slice(0, CONFIG.MAX_MESSAGES).map(m => {
+          // SECURITY FIX P0-035: Sanitize message from storage to prevent Prototype Pollution
+          const sanitizedMsg = sanitizeObject(m);
+
           // ✅ Garantir chatId para permitir abrir o chat/localizar a mensagem a partir do histórico
-          const entry = messageVersions.get(m?.id);
-          const raw = m?.chatId || m?.chat || entry?.chatId || null;
+          const entry = messageVersions.get(sanitizedMsg?.id);
+          const raw = sanitizedMsg?.chatId || sanitizedMsg?.chat || entry?.chatId || null;
           let chatId = raw;
           if (!chatId) {
-            const fallback = String(m?.to || m?.from || '').trim();
+            const fallback = String(sanitizedMsg?.to || sanitizedMsg?.from || '').trim();
             const digits = fallback.replace(/\D/g, '');
             if (digits.length >= 10 && digits.length <= 15) {
               chatId = digits + '@c.us';
@@ -479,9 +504,9 @@
           }
 
           return {
-            ...m,
+            ...sanitizedMsg,
             chatId,
-            sentiment: m.sentiment || (m.body ? analyzeSentiment(m.body) : 'neutral')
+            sentiment: sanitizedMsg.sentiment || (sanitizedMsg.body ? analyzeSentiment(sanitizedMsg.body) : 'neutral')
           };
         });
         
@@ -818,9 +843,12 @@
 
     // PHASE 1: Registrar no novo sistema de versões
     const messageState = mapLegacyActionToState(msg.action);
+    // SECURITY FIX P0-035: Sanitize external data to prevent Prototype Pollution
+    const sanitizedData = sanitizeObject(data);
+    const sanitizedMsg = sanitizeObject(msg);
     registerMessageEvent({
-      ...data,
-      ...msg,
+      ...sanitizedData,
+      ...sanitizedMsg,
       mediaDataPreview: msg.mediaData
     }, messageState, 'handle_new_message');
 
