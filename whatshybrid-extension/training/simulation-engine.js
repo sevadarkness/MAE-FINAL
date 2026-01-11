@@ -13,7 +13,39 @@
 class SimulationEngine {
   // v7.9.13: Backend Soberano - Configuração global
   static FORCE_BACKEND = true;
-  
+
+  // SECURITY FIX P0-032: Sanitize text to prevent prompt injection
+  static sanitizeForPrompt(text, maxLen = 4000) {
+    if (!text) return '';
+    let clean = String(text);
+
+    // Remove control characters
+    clean = clean.replace(/[\x00-\x1F\x7F]/g, '');
+
+    // Dangerous prompt injection patterns
+    const dangerousPatterns = [
+      /\b(ignore|disregard|forget|override)\s+(all\s+)?(previous|above|prior|earlier)\s*(instructions?|prompts?|rules?|guidelines?)/gi,
+      /\b(you\s+are\s+now|act\s+as|pretend\s+to\s+be|roleplay\s+as)\b/gi,
+      /\b(system\s*:?\s*prompt|new\s+instructions?|jailbreak|bypass)\b/gi,
+      /```(system|instruction|prompt)/gi,
+      /<\|.*?\|>/g,  // Special tokens
+      /\[INST\]|\[\/INST\]/gi  // Instruction tokens
+    ];
+
+    dangerousPatterns.forEach(pattern => {
+      if (pattern.test(clean)) {
+        console.warn('[SimulationEngine Security] Prompt injection attempt detected and neutralized');
+        clean = clean.replace(pattern, '[FILTERED]');
+      }
+    });
+
+    if (clean.length > maxLen) {
+      clean = clean.substring(0, maxLen) + '...';
+    }
+
+    return clean.trim();
+  }
+
   constructor() {
     // Estado da simulação
     this.state = {
@@ -386,9 +418,12 @@ REGRAS:
 - Mantenha o tom do tema da simulação
 - Responda apenas com a mensagem do cliente (sem explicações)`;
 
+        // SECURITY FIX P0-032: Sanitize conversation history to prevent prompt injection
+        const safeHistory = SimulationEngine.sanitizeForPrompt(conversationHistory, 2000);
+
         const result = await window.AIService.complete([
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: `Conversa até agora:\n${conversationHistory}\n\nGere a próxima mensagem do cliente:` }
+          { role: 'user', content: `Conversa até agora:\n${safeHistory}\n\nGere a próxima mensagem do cliente:` }
         ], { temperature: 0.8, maxTokens: 150 });
 
         return result.content?.trim() || 'Pode me explicar melhor?';
@@ -481,10 +516,13 @@ ${theme.description}
 
 Responda de forma natural e profissional.`;
 
+        // SECURITY FIX P0-032: Sanitize client message to prevent prompt injection
+        const safeClientMessage = SimulationEngine.sanitizeForPrompt(clientMessage, 1000);
+
         const result = await window.AIService.complete([
           { role: 'system', content: systemPrompt },
           ...conversationHistory,
-          { role: 'user', content: clientMessage }
+          { role: 'user', content: safeClientMessage }
         ], { temperature: 0.7, maxTokens: 300 });
 
         content = result.content;
