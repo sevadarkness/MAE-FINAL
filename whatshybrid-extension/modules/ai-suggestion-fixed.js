@@ -34,9 +34,37 @@
   // HELPERS (Robust package: memória + exemplos + prompt completo)
   // ============================================
 
-  function safeText(v) {
+  // SECURITY FIX P0-033: Enhanced sanitization to prevent prompt injection
+  function safeText(v, maxLen = 4000) {
     if (v === null || v === undefined) return '';
-    return String(v).replace(/\u0000/g, '').trim();
+    let clean = String(v);
+
+    // Remove control characters including null bytes
+    clean = clean.replace(/[\x00-\x1F\x7F]/g, '');
+
+    // SECURITY: Detect and neutralize prompt injection patterns
+    const dangerousPatterns = [
+      /\b(ignore|disregard|forget|override)\s+(all\s+)?(previous|above|prior|earlier)\s*(instructions?|prompts?|rules?|guidelines?)/gi,
+      /\b(you\s+are\s+now|act\s+as|pretend\s+to\s+be|roleplay\s+as)\b/gi,
+      /\b(system\s*:?\s*prompt|new\s+instructions?|jailbreak|bypass)\b/gi,
+      /```(system|instruction|prompt)/gi,
+      /<\|.*?\|>/g,  // Special tokens
+      /\[INST\]|\[\/INST\]/gi  // Instruction tokens
+    ];
+
+    dangerousPatterns.forEach(pattern => {
+      if (pattern.test(clean)) {
+        console.warn('[AISuggestion Security] Prompt injection attempt detected and neutralized');
+        clean = clean.replace(pattern, '[FILTERED]');
+      }
+    });
+
+    // Limit length
+    if (clean.length > maxLen) {
+      clean = clean.substring(0, maxLen) + '...';
+    }
+
+    return clean.trim();
   }
 
   function getActiveChatId() {
